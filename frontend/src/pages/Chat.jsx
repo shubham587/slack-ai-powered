@@ -27,6 +27,7 @@ import {
   HStack,
   Grid,
   useToast,
+  Icon,
 } from '@chakra-ui/react';
 import {
   AddIcon,
@@ -39,6 +40,8 @@ import {
   HamburgerIcon,
   CloseIcon,
   SettingsIcon,
+  AttachmentIcon,
+  DownloadIcon,
 } from '@chakra-ui/icons';
 import UserProfile from '../components/user/UserProfile';
 import UserSettings from '../components/user/UserSettings';
@@ -46,6 +49,7 @@ import DirectMessage from '../components/messages/DirectMessage';
 import ChannelSettings from '../components/channels/ChannelSettings';
 import { fetchChannels, setActiveChannel, createChannel } from '../store/slices/channelsSlice';
 import { fetchPendingInvitations } from '../store/slices/invitationsSlice';
+import MessageInput from '../components/messages/MessageInput';
 
 const Chat = () => {
   const dispatch = useDispatch();
@@ -250,18 +254,20 @@ const Chat = () => {
     socket.emit('join', { channel: channelId });
   };
 
-  const handleSendMessage = async (e) => {
-    e.preventDefault();
-    if (!newMessage.trim() || !currentChannel?.id) return;
+  const handleSendMessage = async (messageData, hasFile) => {
+    if ((!messageData.content?.trim() && !hasFile) || !currentChannel?.id) return;
 
     try {
-      const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5001'}/api/messages/channel/${currentChannel.id}`, {
+      const url = `${import.meta.env.VITE_API_URL || 'http://localhost:5001'}/api/messages/channel/${currentChannel.id}`;
+      const token = localStorage.getItem('token');
+      
+      const response = await fetch(url, {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
+          'Authorization': `Bearer ${token}`,
+          ...(hasFile ? {} : { 'Content-Type': 'application/json' }),
         },
-        body: JSON.stringify({ content: newMessage })
+        body: hasFile ? messageData : JSON.stringify({ content: messageData.content }),
       });
       
       if (!response.ok) {
@@ -276,10 +282,9 @@ const Chat = () => {
         channelId: currentChannel.id,
         message: data
       });
-      
-      setNewMessage('');
     } catch (error) {
       console.error('Error sending message:', error);
+      throw error;
     }
   };
 
@@ -466,6 +471,115 @@ const Chat = () => {
       scrollToBottom();
     } catch (error) {
       console.error('Error loading direct messages:', error);
+    }
+  };
+
+  // Add downloadFile function
+  const downloadFile = async (fileUrl) => {
+    try {
+      const token = localStorage.getItem('token');
+      
+      // Debug token information
+      console.log('Download Token Debug:', {
+        exists: Boolean(token),
+        preview: token ? `${token.substring(0, 10)}...` : 'no token',
+        fileUrl
+      });
+
+      if (!token) {
+        throw new Error('No authentication token found');
+      }
+
+      // Determine if the URL is absolute or relative
+      const isAbsoluteUrl = fileUrl.startsWith('http://') || fileUrl.startsWith('https://');
+      const fullUrl = isAbsoluteUrl ? fileUrl : `${import.meta.env.VITE_API_URL || 'http://localhost:5001'}${fileUrl}`;
+
+      // Debug request configuration
+      const headers = {
+        'Authorization': `Bearer ${token}`
+      };
+      
+      console.log('Download Request Debug:', {
+        originalUrl: fileUrl,
+        fullUrl,
+        isAbsoluteUrl,
+        headers,
+        token: `Bearer ${token.substring(0, 10)}...`
+      });
+
+      const response = await fetch(fullUrl, {
+        method: 'GET',
+        headers,
+        credentials: 'include'
+      });
+
+      // Debug response
+      console.log('Download Response Debug:', {
+        ok: response.ok,
+        status: response.status,
+        statusText: response.statusText,
+        headers: Object.fromEntries(response.headers.entries())
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('Download Error Debug:', {
+          status: response.status,
+          statusText: response.statusText,
+          errorText,
+          responseHeaders: Object.fromEntries(response.headers.entries()),
+          requestHeaders: headers,
+          url: fullUrl
+        });
+        throw new Error(errorText || 'Failed to download file');
+      }
+
+      const blob = await response.blob();
+      const downloadUrl = window.URL.createObjectURL(blob);
+      
+      // Debug download information
+      console.log('Download Info Debug:', {
+        blobType: blob.type,
+        blobSize: blob.size,
+        downloadUrl: downloadUrl.substring(0, 50) + '...',
+        contentDisposition: response.headers.get('content-disposition')
+      });
+
+      const link = document.createElement('a');
+      link.href = downloadUrl;
+      
+      // Get filename from Content-Disposition header or fallback to the URL
+      const contentDisposition = response.headers.get('content-disposition');
+      const filename = contentDisposition
+        ? contentDisposition.split('filename=')[1]?.replace(/["']/g, '') // Remove quotes if present
+        : fileUrl.split('/').pop() || 'download';
+      
+      link.download = filename;
+      
+      // Debug download link
+      console.log('Download Link Debug:', {
+        href: downloadUrl.substring(0, 50) + '...',
+        filename,
+        contentDisposition
+      });
+
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(downloadUrl);
+    } catch (error) {
+      console.error('Download Error:', {
+        name: error.name,
+        message: error.message,
+        stack: error.stack
+      });
+      toast({
+        title: 'Download Error',
+        description: error.message || 'Failed to download file',
+        status: 'error',
+        duration: 5000,
+        isClosable: true,
+      });
     }
   };
 
@@ -735,9 +849,46 @@ const Chat = () => {
                             />
                           </form>
                         ) : (
-                          <Text key={`message-text-${message._id || message.id}`} color="gray.100" whiteSpace="pre-wrap">
-                            {message.content}
-                          </Text>
+                          <>
+                            <Text key={`message-text-${message._id || message.id}`} color="gray.100" whiteSpace="pre-wrap">
+                              {message.content}
+                            </Text>
+                            {message.file && (
+                              <Box
+                                key={`message-file-${message._id || message.id}`}
+                                mt={2}
+                                p={3}
+                                bg="gray.700"
+                                borderRadius="md"
+                                maxW="300px"
+                              >
+                                <Flex align="center" gap={3}>
+                                  <Icon as={AttachmentIcon} boxSize={5} color="blue.300" />
+                                  <Box flex="1" minW={0}>
+                                    <Text fontSize="sm" color="white" isTruncated>
+                                      {message.file.filename}
+                                    </Text>
+                                    <Text fontSize="xs" color="gray.400">
+                                      {(message.file.size / 1024).toFixed(1)} KB
+                                    </Text>
+                                  </Box>
+                                  <IconButton
+                                    icon={<DownloadIcon />}
+                                    size="sm"
+                                    variant="ghost"
+                                    colorScheme="blue"
+                                    onClick={() => {
+                                      // Remove any existing absolute URL to ensure we use our base URL
+                                      const downloadUrl = message.file.download_url.replace(/^https?:\/\/[^/]+/i, '');
+                                      console.log('Initiating download for:', downloadUrl);
+                                      downloadFile(downloadUrl);
+                                    }}
+                                    aria-label="Download file"
+                                  />
+                                </Flex>
+                              </Box>
+                            )}
+                          </>
                         )}
                       </Box>
                       {message.sender_id === user?.id && (
@@ -769,44 +920,11 @@ const Chat = () => {
 
             {/* Message Input */}
             <Box key="message-input-container" px={6} py={4} borderTop="1px" borderColor="gray.700">
-              <form key="message-input-form" onSubmit={handleSendMessage}>
-                <Box key="message-input-box" position="relative">
-                  <Input
-                    key="message-input"
-                    value={newMessage}
-                    onChange={(e) => {
-                      setNewMessage(e.target.value);
-                      handleTyping();
-                    }}
-                    placeholder={currentChannel ? `Message #${currentChannel.name}` : 'Select a channel to start messaging'}
-                    size="lg"
-                    bg="gray.800"
-                    border="1px"
-                    borderColor="gray.600"
-                    _hover={{ borderColor: 'gray.500' }}
-                    _focus={{ borderColor: 'blue.500', boxShadow: 'none' }}
-                    _placeholder={{ color: 'gray.400' }}
-                    disabled={!currentChannel}
-                  />
-                  {typingUsers.size > 0 && (
-                    <Text
-                      key="typing-indicator"
-                      position="absolute"
-                      top="-20px"
-                      left={0}
-                      fontSize="xs"
-                      color="gray.400"
-                    >
-                      {Array.from(typingUsers).map((username, index) => (
-                        <span key={`typing-${username}`}>
-                          {index > 0 && ', '}
-                          {username}
-                        </span>
-                      ))} {typingUsers.size === 1 ? 'is' : 'are'} typing...
-                    </Text>
-                  )}
-                </Box>
-              </form>
+              <MessageInput
+                onSendMessage={handleSendMessage}
+                currentChannel={currentChannel}
+                handleTyping={handleTyping}
+              />
             </Box>
           </Box>
 

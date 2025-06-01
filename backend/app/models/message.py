@@ -1,14 +1,16 @@
 from datetime import datetime
 from bson import ObjectId
 from app import db
+from app.models.file import File
 
 class Message:
-    def __init__(self, channel_id, sender_id, content, message_type='text', _id=None):
+    def __init__(self, channel_id, sender_id, content, message_type='text', file_id=None, _id=None):
         self._id = _id or ObjectId()
         self.channel_id = channel_id
         self.sender_id = sender_id
         self.content = content
-        self.message_type = message_type  # text, image, file, etc.
+        self.message_type = message_type  # text, file
+        self.file_id = file_id
         self.created_at = datetime.utcnow()
         self.updated_at = datetime.utcnow()
         self.delivery_status = {
@@ -23,8 +25,8 @@ class Message:
         }
 
     @staticmethod
-    def create(channel_id, sender_id, content, message_type='text'):
-        message = Message(channel_id, sender_id, content, message_type)
+    def create(channel_id, sender_id, content, message_type='text', file_id=None):
+        message = Message(channel_id, sender_id, content, message_type, file_id)
         result = db.messages.insert_one(message.to_dict())
         message._id = result.inserted_id
         return message
@@ -96,6 +98,7 @@ class Message:
             sender_id=data['sender_id'],
             content=data['content'],
             message_type=data['message_type'],
+            file_id=data.get('file_id'),
             _id=data['_id']
         )
         message.created_at = data['created_at']
@@ -119,6 +122,7 @@ class Message:
             'sender_id': self.sender_id,
             'content': self.content,
             'message_type': self.message_type,
+            'file_id': self.file_id,
             'created_at': self.created_at,
             'updated_at': self.updated_at,
             'delivery_status': self.delivery_status
@@ -129,7 +133,7 @@ class Message:
         sender = db.users.find_one({'_id': self.sender_id})
         username = sender['username'] if sender else 'Unknown User'
         
-        return {
+        response = {
             'id': str(self._id),
             'channel_id': str(self.channel_id),
             'sender_id': str(self.sender_id),
@@ -148,4 +152,12 @@ class Message:
                 'delivered_at': self.delivery_status['delivered_at'].isoformat() if self.delivery_status['delivered_at'] else None,
                 'read_at': self.delivery_status['read_at'].isoformat() if self.delivery_status['read_at'] else None
             }
-        } 
+        }
+        
+        # Add file information if this is a file message
+        if self.file_id:
+            file_obj = File.get_by_id(self.file_id)
+            if file_obj:
+                response['file'] = file_obj.to_response_dict()
+                
+        return response 

@@ -37,41 +37,152 @@ def get_channel_messages(channel_id):
 def send_message(channel_id):
     """Send a message to a channel"""
     try:
-        data = request.get_json()
-        if not data or 'content' not in data:
-            return jsonify({'error': 'Message content is required'}), 400
-            
+        print("\n=== New Message Request ===")
+        print(f"Channel ID: {channel_id}")
+        print(f"Content-Type: {request.content_type}")
+        print(f"Files: {list(request.files.keys()) if request.files else 'No files'}")
+        print(f"Form Data: {list(request.form.keys()) if request.form else 'No form data'}")
+        
         # Convert string ID to ObjectId
         try:
-            channel_id = ObjectId(channel_id)
-        except:
-            return jsonify({'error': 'Invalid channel ID format'}), 400
-            
+            channel_id_obj = ObjectId(channel_id)
+            print(f"Valid ObjectId: {channel_id_obj}")
+        except Exception as e:
+            print(f"Invalid channel ID format: {channel_id}, error: {str(e)}")
+            return jsonify({'error': f'Invalid channel ID format: {str(e)}'}), 400
+        
+        # Get user ID and verify token
+        try:
+            user_id = ObjectId(get_jwt_identity())
+            print(f"Authenticated User ID: {user_id}")
+        except Exception as e:
+            print(f"Authentication error: {str(e)}")
+            return jsonify({'error': 'Invalid authentication token'}), 401
+        
         # Check if channel exists and user is a member
-        user_id = ObjectId(get_jwt_identity())
         channel = db.channels.find_one({
-            '_id': channel_id,
+            '_id': channel_id_obj,
             'members': user_id
         })
         
         if not channel:
+            print(f"Channel access error: Channel not found or user {user_id} not a member of channel {channel_id}")
             return jsonify({'error': 'Channel not found or you are not a member'}), 404
+        
+        print(f"Channel access verified: {channel.get('name', 'unnamed')}")
+        
+        # Handle file upload
+        if 'file' in request.files:
+            file = request.files['file']
+            content = request.form.get('content', '')
             
-        # Create message
-        message = Message.create(
-            channel_id=channel_id,
-            sender_id=user_id,
-            content=data['content'],
-            message_type=data.get('type', 'text')
-        )
-        
-        # Emit message to channel subscribers
-        message_data = message.to_response_dict()
-        socketio.emit('new_message', message_data, room=str(channel_id))
-        
-        return jsonify(message_data), 201
-        
+            print("\n=== File Upload Details ===")
+            print(f"Filename: {file.filename}")
+            print(f"Content Type: {file.content_type}")
+            print(f"MIME Type: {file.mimetype}")
+            
+            if not file or not file.filename:
+                print("Error: Missing file or filename")
+                return jsonify({'error': 'No file provided'}), 400
+            
+            # Upload file
+            from app.models.file import File
+            try:
+                # Read file content and get size
+                file_content = file.read()
+                file_size = len(file_content)
+                
+                print(f"File size: {file_size} bytes")
+                
+                if file_size == 0:
+                    print("Error: Empty file")
+                    return jsonify({'error': 'Empty file provided'}), 400
+                
+                if file_size > 16 * 1024 * 1024:  # 16MB limit
+                    print("Error: File too large")
+                    return jsonify({'error': 'File size exceeds 16MB limit'}), 400
+                
+                # Determine file type based on extension
+                file_type = 'document'  # default
+                if file.filename.lower().endswith(('.jpg', '.jpeg', '.png', '.gif')):
+                    file_type = 'image'
+                elif file.filename.lower().endswith(('.py', '.js', '.jsx', '.ts', '.tsx', '.json', '.html', '.css')):
+                    file_type = 'code'
+                elif file.filename.lower().endswith(('.zip', '.rar', '.7z', '.tar', '.gz')):
+                    file_type = 'archive'
+                
+                file_obj = File.create(
+                    filename=file.filename,
+                    content_type=file.content_type or file.mimetype,
+                    size=file_size,
+                    uploader_id=user_id,
+                    file_type=file_type
+                )
+                
+                # Save the file
+                file_obj.save_file(file_content)
+                print(f"File saved successfully with ID: {file_obj._id}")
+                
+                # Create message with file attachment
+                message = Message.create(
+                    channel_id=channel_id_obj,
+                    sender_id=user_id,
+                    content=content,
+                    message_type='file',
+                    file_id=file_obj._id
+                )
+                
+                print(f"Message created with ID: {message._id}")
+                
+                # Add file metadata to message response
+                message_data = message.to_response_dict()
+                message_data['file'] = file_obj.to_response_dict()
+                
+                # Emit message to channel subscribers
+                socketio.emit('new_message', message_data, room=str(channel_id))
+                
+                return jsonify(message_data), 201
+                
+            except ValueError as e:
+                print(f"File processing error: {str(e)}")
+                return jsonify({'error': f'Error processing file: {str(e)}'}), 400
+            except Exception as e:
+                print(f"Unexpected file processing error: {str(e)}")
+                return jsonify({'error': 'Failed to process file upload'}), 500
+                
+        else:
+            # Handle regular text message
+            try:
+                data = request.get_json()
+                print("\n=== Text Message Details ===")
+                print(f"Message Data: {data}")
+                
+                if not data or 'content' not in data:
+                    print("Error: Missing message content")
+                    return jsonify({'error': 'Message content is required'}), 400
+                
+                # Create message
+                message = Message.create(
+                    channel_id=channel_id_obj,
+                    sender_id=user_id,
+                    content=data['content'],
+                    message_type=data.get('type', 'text')
+                )
+                
+                print(f"Message created with ID: {message._id}")
+                
+                # Emit message to channel subscribers
+                message_data = message.to_response_dict()
+                socketio.emit('new_message', message_data, room=str(channel_id))
+                
+                return jsonify(message_data), 201
+                
+            except Exception as e:
+                print(f"Text message processing error: {str(e)}")
+                return jsonify({'error': f'Error processing text message: {str(e)}'}), 400
+            
     except Exception as e:
+        print(f"Unexpected error in send_message: {str(e)}")
         return jsonify({'error': str(e)}), 400
 
 @bp.route('/search', methods=['GET'])
