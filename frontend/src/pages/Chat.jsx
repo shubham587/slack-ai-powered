@@ -117,11 +117,23 @@ const Chat = () => {
     // Set up socket event listeners
     const handleNewMessage = (data) => {
       console.log('Received message:', data);
-      if (data.channelId === currentChannel?.id) {
-        setMessages(prev => [...prev, data.message]);
+      const messageChannelId = data.channelId || data.channel_id;
+      if (messageChannelId === currentChannel?.id) {
+        setMessages(prev => [...prev, data.message || data]);
         setTimeout(() => {
           scrollToBottom();
         }, 100);
+        
+        // Update last message in directMessages list if it's a DM
+        if (currentChannel.isDirect) {
+          setDirectMessages(prev => 
+            prev.map(dm => 
+              dm.channel_id === messageChannelId 
+                ? { ...dm, last_message: data.message || data }
+                : dm
+            )
+          );
+        }
       }
     };
 
