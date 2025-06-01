@@ -1,0 +1,23 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+This is a Slack clone project with the following tech stack:
+
+Frontend:
+- React with Vite for fast builds and hot reloading
+- Socket.IO client for real-time communication
+- Axios for REST API calls
+- Styling with Tailwind CSS (or any preferred CSS framework)
+
+Backend:
+- Flask web framework in Python
+- Flask-SocketIO for WebSocket support and real-time events
+- PyMongo for MongoDB interactions
+- OpenAI Python SDK to interact with GPT and embedding APIs
+- Vector search with FAISS or Chroma for semantic search of messages and docs
+- MongoDB for storing users, messages, channels, threads, and pinned documents
+- Background job processing (optional) for async embedding generation
+
+The app supports real-time messaging, AI-driven organization-wide memory, auto-reply suggestions, tone analysis, and meeting notes generation.

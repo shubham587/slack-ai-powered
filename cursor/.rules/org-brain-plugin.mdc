@@ -1,0 +1,9 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+- Embed messages and pinned docs with OpenAI embeddings API
+- Store vectors in FAISS or Chroma vector database
+- Query endpoint /ask-org-brain performs semantic search and GPT summarization
+- Return AI summaries for user questions about org projects or updates

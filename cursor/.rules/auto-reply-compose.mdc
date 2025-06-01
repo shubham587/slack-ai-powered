@@ -1,0 +1,8 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+- “Suggest Reply” button fetches message thread + org memory context
+- Sends context to OpenAI Chat API for reply suggestions
+- Displays suggested replies for user to edit or send

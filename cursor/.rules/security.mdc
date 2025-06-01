@@ -1,0 +1,10 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+- Store API keys, MongoDB URI, and config in .env files
+- Validate backend inputs
+- Authenticate Socket.IO and REST API endpoints
+- Restrict CORS to frontend domain
+- Use HTTPS in production

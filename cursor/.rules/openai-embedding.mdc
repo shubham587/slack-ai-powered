@@ -1,0 +1,10 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+- Use OpenAI embeddings API to vectorize messages/docs
+- Store in vector DB (FAISS or Chroma)
+- Perform semantic similarity search on user queries
+- Use top-k relevant data as context for GPT completions
+- Keep embeddings updated for new messages/docs

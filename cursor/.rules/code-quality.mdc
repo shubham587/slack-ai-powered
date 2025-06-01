@@ -1,0 +1,9 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+- Modular React components, separate UI and hooks/services
+- Flask routes and socket handlers in separate modules
+- Async tasks for embedding and AI calls
+- Proper error handling and logging

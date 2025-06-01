@@ -1,0 +1,105 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+# 🎨 Slack Clone – UI/UX Design Rules (Frontend)
+
+This document outlines the design guidelines for building the Slack Clone frontend using Tailwind CSS, inspired by Slack's dark theme interface.
+
+---
+
+## 🌈 Color Palette (Slack-Inspired)
+
+| Purpose                     | Color Code       | Description                      |
+|----------------------------|------------------|----------------------------------|
+| Primary Background         | `#1A1D21`        | Dark base for sidebar/nav        |
+| Primary Accent             | `#611F69`        | Brand purple (Slack accent)      |
+| Hover/Highlight            | `#4A154B`        | Slightly lighter purple          |
+| Message Bubble (User)      | `#1164A3`        | Blue tone for user's message     |
+| Message Bubble (Others)    | `#EDEDED`        | Light gray bubble                |
+| Border/Divider             | `#3C3F44`        | Used in sidebar separators       |
+| Text Primary               | `#FFFFFF`        | Main white text                  |
+| Text Secondary             | `#B6B6B6`        | Muted/gray subtext               |
+| Background (Main Chat)     | `#2C2D30`        | Dark gray background             |
+| Input Field BG             | `#3F0E40`        | Slight dark purple background    |
+
+---
+
+## 🔠 Typography
+
+- **Primary Font**: `Inter`, `Segoe UI`, or `system-ui`
+- **Font Weights**: 400 (regular), 500 (medium), 700 (bold)
+- **Base Size**: `16px`
+  - `h1`: `24px`
+  - `h2`: `20px`
+  - `h3`: `18px`
+
+---
+
+## 📐 Spacing & Layout
+
+- Use TailwindCSS utility-first approach
+- Components:
+  - Padding: `p-4` to `p-6`
+  - Rounded: `rounded-xl`
+  - Shadows: `shadow-md`
+- Layout:
+  - Sidebar width: `w-1/4` (desktop)
+  - Main Chat: `w-3/4`
+  - Fixed bottom bar for message input
+- Message bubbles:
+  - `space-y-3` between messages
+  - `px-4 py-3` for bubble padding
+
+---
+
+## 🧩 Reusable Components
+
+- `SidebarItem`
+- `ChannelList`
+- `UserList`
+- `MessageBubble`
+- `MessageInput`
+- `ChatHeader`
+- `Tooltip`, `Badge`, `Avatar`
+
+---
+
+## 📲 Interactions
+
+- Hover states: `hover:bg-gray-700` or `hover:bg-[#4A154B]`
+- Typing indicator: "User is typing..." with pulsing dots
+- Message status: "Sending...", "Sent ✅", "Failed ❌"
+- Timestamps: Small, muted gray beside username
+- AI Suggested Messages: Distinct tag + icon (⚡)
+
+---
+
+## 📱 Responsive Design
+
+- Desktop: Sidebar + Main content (2-panel layout)
+- Mobile:
+  - Sidebar becomes collapsible drawer
+  - Message input fixed at bottom
+- Tailwind breakpoints: `sm:`, `md:`, `lg:`
+
+---
+
+## 🤖 AI Assistant UI Guidelines
+
+- AI messages:
+  - Gray bubble background (`bg-gray-800`)
+  - Label with ⚡ + "Suggested by AI"
+- Tone & Impact meter:
+  - Tags:
+    - `bg-yellow-600` → Aggressive
+    - `bg-green-600` → High-Impact
+- Meeting Notes:
+  - Modal or pinned card view
+  - Export/download option (optional)
+
+---
+
+## ✅ Cursor Rule Prompt (include in `.rules` file)
+

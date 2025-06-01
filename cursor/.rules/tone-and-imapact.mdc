@@ -1,0 +1,8 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+- Analyze message tone via OpenAI before sending
+- Provide real-time feedback: aggressive, weak, confusing, high-impact, low-impact
+- Allow user edits based on feedback

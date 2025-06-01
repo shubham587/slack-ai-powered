@@ -1,0 +1,9 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+- Select a thread or channel to generate meeting notes
+- Fetch full conversation from MongoDB
+- Use OpenAI Chat API with prompt to generate notes
+- Display notes in UI

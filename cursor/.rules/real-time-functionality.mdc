@@ -1,0 +1,11 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+Build the real-time chat feature:
+- React components: ChatWindow, MessageList, MessageInput
+- Connect to Flask-SocketIO backend to send/receive messages instantly
+- On backend, handle Socket.IO events for 'send_message' and broadcast to channel subscribers
+- Persist all messages with metadata (user_id, channel_id, timestamp) in MongoDB
+- Allow joining/leaving channels with appropriate socket rooms

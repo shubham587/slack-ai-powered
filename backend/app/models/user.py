@@ -1,0 +1,93 @@
+from werkzeug.security import generate_password_hash, check_password_hash
+from app import db
+from datetime import datetime
+from bson import ObjectId
+
+class User:
+    def __init__(self, username, email, password=None, _id=None):
+        self._id = _id or ObjectId()
+        self.username = username
+        self.email = email
+        self.password_hash = generate_password_hash(password, method='pbkdf2:sha256') if password else None
+        self.created_at = datetime.utcnow()
+        self.updated_at = datetime.utcnow()
+
+    @staticmethod
+    def create(username, email, password):
+        if db.users.find_one({'$or': [{'username': username}, {'email': email}]}):
+            return None
+        
+        user = User(username, email, password)
+        result = db.users.insert_one(user.to_dict())
+        user._id = result.inserted_id
+        return user
+
+    @staticmethod
+    def get_by_id(user_id):
+        user_data = db.users.find_one({'_id': ObjectId(user_id)})
+        if user_data:
+            return User.from_dict(user_data)
+        return None
+
+    @staticmethod
+    def get_by_email(email):
+        user_data = db.users.find_one({'email': email})
+        if user_data:
+            return User.from_dict(user_data)
+        return None
+
+    @staticmethod
+    def get_by_username(username):
+        user_data = db.users.find_one({'username': username})
+        if user_data:
+            return User.from_dict(user_data)
+        return None
+
+    def check_password(self, password):
+        return check_password_hash(self.password_hash, password)
+
+    def to_dict(self):
+        return {
+            '_id': self._id,
+            'username': self.username,
+            'email': self.email,
+            'password_hash': self.password_hash,
+            'created_at': self.created_at,
+            'updated_at': self.updated_at
+        }
+
+    @staticmethod
+    def from_dict(data):
+        user = User(
+            username=data['username'],
+            email=data['email'],
+            _id=data['_id']
+        )
+        user.password_hash = data['password_hash']
+        user.created_at = data['created_at']
+        user.updated_at = data['updated_at']
+        return user
+
+    def update(self, data):
+        updates = {}
+        if 'username' in data:
+            updates['username'] = data['username']
+        if 'email' in data:
+            updates['email'] = data['email']
+        if 'password' in data:
+            updates['password_hash'] = generate_password_hash(data['password'], method='pbkdf2:sha256')
+        
+        if updates:
+            updates['updated_at'] = datetime.utcnow()
+            db.users.update_one({'_id': self._id}, {'$set': updates})
+            for key, value in updates.items():
+                setattr(self, key, value)
+
+    def to_response_dict(self):
+        return {
+            'id': str(self._id),
+            'username': self.username,
+            'email': self.email,
+            'created_at': self.created_at.isoformat(),
+            'updated_at': self.updated_at.isoformat()
+        } 
