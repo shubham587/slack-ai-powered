@@ -14,6 +14,7 @@ def handle_connect(auth):
     try:
         # Get auth token from query string or headers
         if not auth or not isinstance(auth, dict) or 'token' not in auth:
+            print("No auth token provided")
             return False
             
         # Verify JWT token
@@ -24,32 +25,57 @@ def handle_connect(auth):
         # Store user_id in session
         session['user_id'] = user_id
         
-        # Join user's room for direct messages
-        join_room(str(user_id))
+        # Join user's room for direct messages and notifications
+        user_room = str(user_id)
+        join_room(user_room)
+        print(f"User {user_id} joined their personal room: {user_room}")
         
         # Join all user's channel rooms
         channels = Channel.get_user_channels(user_id)
         for channel in channels:
-            join_room(str(channel._id))
+            channel_room = str(channel._id)
+            join_room(channel_room)
+            print(f"User {user_id} joined channel room: {channel_room}")
         
         return True
     except Exception as e:
         print(f"Connection error: {str(e)}")
         return False
 
+@socketio.on('join_user_room')
+def on_join_user_room(data):
+    """Join a user's personal room for notifications"""
+    try:
+        user_id = data.get('user_id')
+        if user_id:
+            user_room = str(user_id)
+            join_room(user_room)
+            print(f"User {user_id} joined their personal room: {user_room}")
+            print(f"Current rooms for user: {request.sid}")
+    except Exception as e:
+        print(f"Error joining user room: {e}")
+        print(f"Data received: {data}")
+        print(f"Current session: {session}")
+
 @socketio.on('disconnect')
 def handle_disconnect():
     """Handle client disconnection"""
     if 'user_id' in session:
         user_id = session['user_id']
+        user_room = str(user_id)
         
-        # Leave user's room
-        leave_room(str(user_id))
+        # Leave user's personal room
+        leave_room(user_room)
+        print(f"User {user_id} left their personal room: {user_room}")
         
         # Leave all channel rooms
         channels = Channel.get_user_channels(user_id)
         for channel in channels:
-            leave_room(str(channel._id))
+            channel_room = str(channel._id)
+            leave_room(channel_room)
+            print(f"User {user_id} left channel room: {channel_room}")
+            
+        session.pop('user_id', None)
 
 @socketio.on('join_channel')
 def handle_join_channel(data):
@@ -216,4 +242,52 @@ def handle_message_read(data):
 @socketio.on('error')
 def handle_error(error):
     """Handle socket errors"""
-    print(f"Socket error: {str(error)}") 
+    print(f"Socket error: {str(error)}")
+
+@socketio.on('join_thread')
+def on_join_thread(data):
+    """Join a thread room"""
+    try:
+        thread_id = data.get('thread_id')
+        if thread_id:
+            thread_room = f'thread_{thread_id}'
+            join_room(thread_room)
+            print(f"User joined thread room: {thread_room}")
+    except Exception as e:
+        print(f"Error joining thread room: {e}")
+
+@socketio.on('leave_thread')
+def on_leave_thread(data):
+    """Leave a thread room"""
+    try:
+        thread_id = data.get('thread_id')
+        if thread_id:
+            thread_room = f'thread_{thread_id}'
+            leave_room(thread_room)
+            print(f"User left thread room: {thread_room}")
+    except Exception as e:
+        print(f"Error leaving thread room: {e}")
+
+@socketio.on('new_reply')
+def handle_new_reply(data):
+    """Handle new reply event"""
+    try:
+        message_id = data.get('message_id')
+        reply = data.get('reply')
+        if message_id and reply:
+            # Get the thread room and channel room
+            thread_room = f'thread_{message_id}'
+            channel_id = reply.get('channel_id')
+            
+            # Emit to both rooms
+            emit('new_reply', data, room=thread_room)
+            if channel_id:
+                emit('reply_count_update', {
+                    'message_id': message_id,
+                    'reply_count': reply.get('reply_count', 0)
+                }, room=str(channel_id))
+                
+                # Also emit the full reply data to the channel
+                emit('new_reply', data, room=str(channel_id))
+    except Exception as e:
+        print(f"Error handling new reply: {e}") 

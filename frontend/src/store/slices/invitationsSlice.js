@@ -38,38 +38,35 @@ export const createInvitation = createAsyncThunk(
   'invitations/create',
   async ({ channelId, userId }, { rejectWithValue }) => {
     try {
+      console.log('Creating invitation with data:', { channelId, userId });
       const token = localStorage.getItem('token');
+      
+      const requestBody = {
+        channel_id: channelId,
+        invitee_id: userId,
+      };
+      console.log('Request body:', requestBody);
+      
       const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5001'}/api/invitations`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`,
         },
-        body: JSON.stringify({
-          channel_id: channelId,
-          invitee_id: userId,
-        }),
+        body: JSON.stringify(requestBody),
       });
 
-      if (!response.ok) {
-        throw new Error('Failed to create invitation');
-      }
-
       const data = await response.json();
-      
-      // Get socket instance and emit event
-      const socket = getSocket();
-      if (socket) {
-        socket.emit('new_invitation', {
-          invitation_id: data.id,
-          channel_id: channelId,
-          invitee_id: userId,
-          channel_name: data.channel_name
-        });
+      console.log('Response status:', response.status);
+      console.log('Response data:', data);
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to create invitation');
       }
 
       return data;
     } catch (error) {
+      console.error('Error creating invitation:', error);
       return rejectWithValue(error.message);
     }
   }
@@ -111,9 +108,18 @@ const invitationsSlice = createSlice({
       state.invitations = action.payload;
     },
     addInvitation: (state, action) => {
+      console.log('Adding invitation:', action.payload);
+      console.log('Current user ID:', localStorage.getItem('userId'));
+      
       // Check if invitation already exists
       const exists = state.invitations.some(inv => inv.id === action.payload.id);
-      if (!exists) {
+      // Compare string versions of IDs
+      const isInvitee = String(action.payload.invitee_id) === String(localStorage.getItem('userId'));
+      
+      console.log('Invitation exists:', exists);
+      console.log('Is invitee:', isInvitee);
+      
+      if (!exists && isInvitee) {
         state.invitations.push(action.payload);
       }
     },
@@ -130,7 +136,11 @@ const invitationsSlice = createSlice({
       })
       .addCase(fetchPendingInvitations.fulfilled, (state, action) => {
         state.status = 'succeeded';
-        state.invitations = action.payload;
+        // Filter invitations for current user
+        const currentUserId = localStorage.getItem('userId');
+        state.invitations = action.payload.filter(inv => 
+          String(inv.invitee_id) === String(currentUserId)
+        );
       })
       .addCase(fetchPendingInvitations.rejected, (state, action) => {
         state.status = 'failed';

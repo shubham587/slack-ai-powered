@@ -28,17 +28,15 @@ import {
   IconButton,
   Flex,
   Avatar,
-  useDisclosure,
   Spinner,
 } from '@chakra-ui/react';
-import { DeleteIcon, AddIcon } from '@chakra-ui/icons';
+import { DeleteIcon } from '@chakra-ui/icons';
 import {
   updateChannel,
   addChannelMember,
   removeChannelMember,
   selectChannelById,
 } from '../../store/slices/channelsSlice';
-import AddMemberModal from './AddMemberModal';
 import { createInvitation } from '../../store/slices/invitationsSlice';
 import axios from 'axios';
 import { useDebounce } from '../../hooks/useDebounce';
@@ -47,11 +45,6 @@ const ChannelSettings = ({ isOpen, onClose, channelId }) => {
   const dispatch = useDispatch();
   const toast = useToast();
   const channel = useSelector(state => selectChannelById(state, channelId));
-  const {
-    isOpen: isAddMemberOpen,
-    onOpen: onAddMemberOpen,
-    onClose: onAddMemberClose,
-  } = useDisclosure();
   
   const [formData, setFormData] = useState({
     name: '',
@@ -70,7 +63,7 @@ const ChannelSettings = ({ isOpen, onClose, channelId }) => {
         topic: channel.topic || '',
       });
     }
-  }, [channel]);
+  }, [channel?.id]); // Only update when channel ID changes
 
   const [isLoading, setIsLoading] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
@@ -83,7 +76,7 @@ const ChannelSettings = ({ isOpen, onClose, channelId }) => {
   // Update search effect to use debouncedSearchTerm
   useEffect(() => {
     const searchUsers = async () => {
-      if (!debouncedSearchTerm) {
+      if (!debouncedSearchTerm || !channelId) {
         setSearchResults([]);
         return;
       }
@@ -91,29 +84,70 @@ const ChannelSettings = ({ isOpen, onClose, channelId }) => {
       setIsSearching(true);
       try {
         const token = localStorage.getItem('token');
-        const response = await axios.get(
-          `${import.meta.env.VITE_API_URL || 'http://localhost:5001'}/api/users/search?q=${debouncedSearchTerm}`,
+        const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:5001';
+        
+        // Get users matching search term
+        const usersResponse = await axios.get(
+          `${baseUrl}/api/users/search?q=${debouncedSearchTerm}`,
           {
             headers: {
-              'Authorization': `Bearer ${token}`
+              'Authorization': `Bearer ${token}`,
+              'Content-Type': 'application/json'
             }
           }
         );
         
-        // Filter out users who are already members
-        const users = Array.isArray(response.data) ? response.data : [];
-        if (channel && channel.members) {
-          setSearchResults(users.filter(user => 
-            !channel.members.find(member => member.id === user.id)
-          ));
-        } else {
-          setSearchResults(users);
-        }
+        // Get pending invitations for this channel
+        const invitationsResponse = await axios.get(
+          `${baseUrl}/api/invitations/channel/${channelId}/pending`,
+          {
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              'Content-Type': 'application/json'
+            }
+          }
+        );
+        
+        // Filter out users who are already members or have pending invitations
+        const users = Array.isArray(usersResponse.data) ? usersResponse.data : [];
+        const pendingInvitations = Array.isArray(invitationsResponse.data) ? invitationsResponse.data : [];
+        const currentMembers = channel?.members || [];
+        
+        const filteredUsers = users.filter(user => {
+          // Not a member
+          const isMember = currentMembers.some(member => 
+            String(member?.id) === String(user.id)
+          );
+          if (isMember) return false;
+          
+          // Doesn't have a pending invitation
+          const hasPendingInvitation = pendingInvitations.some(inv => 
+            String(inv.invitee_id) === String(user.id) && 
+            inv.status === 'pending'
+          );
+          return !hasPendingInvitation;
+        });
+        
+        setSearchResults(filteredUsers);
       } catch (error) {
         console.error('Error searching users:', error);
+        
+        // More detailed error handling
+        let errorMessage = 'Failed to search users';
+        if (error.response) {
+          // Server responded with error
+          errorMessage = error.response.data?.error || `Server error: ${error.response.status}`;
+        } else if (error.request) {
+          // Request made but no response
+          errorMessage = 'No response from server. Please check your connection.';
+        } else {
+          // Request setup error
+          errorMessage = error.message;
+        }
+        
         toast({
           title: 'Error searching users',
-          description: error.response?.data?.error || 'Failed to search users',
+          description: errorMessage,
           status: 'error',
           duration: 3000,
           isClosable: true,
@@ -125,7 +159,7 @@ const ChannelSettings = ({ isOpen, onClose, channelId }) => {
     };
 
     searchUsers();
-  }, [debouncedSearchTerm, channel, toast]);
+  }, [debouncedSearchTerm, channelId, channel?.id]); // Only depend on necessary values
 
   const handleChange = (e) => {
     const { name, value, checked } = e.target;
@@ -198,6 +232,7 @@ const ChannelSettings = ({ isOpen, onClose, channelId }) => {
 
   const handleInviteUser = async (userId) => {
     try {
+      console.log('Inviting user to channel:', { userId, channelId });
       await dispatch(createInvitation({
         channelId,
         userId
@@ -213,9 +248,16 @@ const ChannelSettings = ({ isOpen, onClose, channelId }) => {
       setSearchTerm('');
       setSearchResults([]);
     } catch (error) {
+      console.error('Error in handleInviteUser:', error);
+      
+      // Show user-friendly error message
+      const errorMessage = error.message === 'Invitation already exists' 
+        ? 'This user already has a pending invitation to this channel'
+        : error.message || 'Something went wrong';
+        
       toast({
         title: 'Error sending invitation',
-        description: error.message || 'Something went wrong',
+        description: errorMessage,
         status: 'error',
         duration: 3000,
         isClosable: true,
@@ -299,18 +341,11 @@ const ChannelSettings = ({ isOpen, onClose, channelId }) => {
                     <Text fontSize="lg" fontWeight="bold">
                       Members ({channel.members?.length || 0})
                     </Text>
-                    <Button
-                      leftIcon={<AddIcon />}
-                      size="sm"
-                      onClick={onAddMemberOpen}
-                    >
-                      Add Members
-                    </Button>
                   </Flex>
                 </Box>
                 
                 <List spacing={2}>
-                  {channel.members?.map((member) => (
+                  {(channel.members || []).map((member) => member && (
                     <ListItem
                       key={member.id}
                       p={2}
@@ -321,12 +356,12 @@ const ChannelSettings = ({ isOpen, onClose, channelId }) => {
                         <Flex align="center">
                           <Avatar
                             size="sm"
-                            name={member.username}
+                            name={member.username || 'Unknown User'}
                             src={member.avatar_url}
                             mr={2}
                           />
                           <Box>
-                            <Text>{member.username}</Text>
+                            <Text>{member.username || 'Unknown User'}</Text>
                             {member.id === channel.created_by && (
                               <Text fontSize="xs" color="gray.400">
                                 Creator
@@ -342,6 +377,7 @@ const ChannelSettings = ({ isOpen, onClose, channelId }) => {
                             colorScheme="red"
                             size="sm"
                             onClick={() => handleRemoveMember(member.id)}
+                            aria-label="Remove member"
                           />
                         )}
                       </Flex>

@@ -1,4 +1,4 @@
-import React, { useRef, useEffect } from 'react';
+import React, { useRef, useEffect, useState } from 'react';
 import {
   VStack,
   Box,
@@ -6,18 +6,45 @@ import {
   HStack,
   Avatar,
   useToast,
+  Flex,
+  IconButton,
+  Grid,
+  Modal,
+  ModalOverlay,
+  ModalContent,
+  ModalHeader,
+  ModalBody,
+  ModalCloseButton,
+  Tooltip,
+  Icon,
+  Menu,
+  MenuButton,
+  MenuList,
+  MenuItem,
+  MenuDivider,
 } from '@chakra-ui/react';
-import { AttachmentIcon } from '@chakra-ui/icons';
+import {
+  AttachmentIcon,
+  DownloadIcon,
+  ChatIcon,
+  SettingsIcon,
+  AddIcon,
+  SearchIcon,
+  ChevronDownIcon,
+  BellIcon,
+  HamburgerIcon,
+  CloseIcon,
+  EditIcon,
+  DeleteIcon,
+} from '@chakra-ui/icons';
+import { BsThreeDotsVertical } from 'react-icons/bs';
+import { AiFillPushpin, AiOutlinePushpin } from 'react-icons/ai';
 import MessageInput from '../components/messages/MessageInput';
-
-// Helper function to format file size
-const formatFileSize = (bytes) => {
-  if (bytes === 0) return '0 Bytes';
-  const k = 1024;
-  const sizes = ['Bytes', 'KB', 'MB', 'GB'];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
-};
+import { useDispatch, useSelector } from 'react-redux';
+import { pinMessage, unpinMessage } from '../store/slices/channelsSlice';
+import { selectUser } from '../store/slices/userSlice';
+import { FiDownload } from 'react-icons/fi';
+import { formatFileSize } from '../utils/formatFileSize';
 
 const handleSendMessage = async (messageData, hasFile) => {
   if ((!messageData.content?.trim() && !hasFile) || !currentChannel?.id) {
@@ -268,58 +295,350 @@ const handleMessageClick = (message) => {
   }
 };
 
-return (
-  <VStack spacing={4} h="100%" w="100%">
-    <Box
-      flex="1"
-      w="100%"
-      overflowY="auto"
-      p={4}
-      bg="gray.800"
-      borderRadius="md"
-    >
-      {messages.map((message) => (
-        <Box
-          key={message.id}
-          mb={4}
-          onClick={() => handleMessageClick(message)}
-          cursor={message.file ? 'pointer' : 'default'}
-          _hover={message.file ? { bg: 'gray.700' } : {}}
-          p={2}
-          borderRadius="md"
-        >
-          <HStack spacing={2} alignItems="flex-start">
-            <Avatar size="sm" name={message.username} />
-            <Box>
-              <Text color="gray.300" fontSize="sm">
-                {message.username}
-                <Text as="span" ml={2} color="gray.500" fontSize="xs">
-                  {new Date(message.created_at).toLocaleString()}
-                </Text>
-              </Text>
-              {message.file ? (
-                <VStack align="start" spacing={1}>
-                  <Text color="white">{message.content}</Text>
-                  <HStack>
-                    <AttachmentIcon />
-                    <Text color="blue.300">
-                      {message.file.filename} ({formatFileSize(message.file.size)})
-                    </Text>
-                  </HStack>
+const handleDeleteMessage = async (messageId) => {
+  try {
+    const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5001'}/api/messages/${messageId}`, {
+      method: 'DELETE',
+      headers: {
+        'Authorization': `Bearer ${localStorage.getItem('token')}`
+      }
+    });
+
+    if (!response.ok) {
+      throw new Error('Failed to delete message');
+    }
+
+    // Remove message from state
+    setMessages(prev => prev.filter(msg => msg.id !== messageId));
+
+    toast({
+      title: 'Message deleted',
+      status: 'success',
+      duration: 2000,
+      isClosable: true,
+    });
+  } catch (error) {
+    console.error('Error deleting message:', error);
+    toast({
+      title: 'Error',
+      description: error.message || 'Failed to delete message',
+      status: 'error',
+      duration: 3000,
+      isClosable: true,
+    });
+  }
+};
+
+const Chat = () => {
+  const dispatch = useDispatch();
+  const user = useSelector(selectUser);
+  const toast = useToast();
+  const channels = useSelector(state => state.channels.channels);
+  const [currentChannel, setCurrentChannel] = useState(null);
+  const [messages, setMessages] = useState([]);
+  const [directMessages, setDirectMessages] = useState([]);
+  const [isDirectMessageOpen, setIsDirectMessageOpen] = useState(false);
+  const [showNewChannelModal, setShowNewChannelModal] = useState(false);
+  const [showChannelSettings, setShowChannelSettings] = useState(false);
+  const [showPinnedFiles, setShowPinnedFiles] = useState(false);
+  const [pinnedMessages, setPinnedMessages] = useState([]);
+  const [editingMessage, setEditingMessage] = useState(null);
+
+  // Add effect to load pinned messages when channel changes
+  useEffect(() => {
+    if (currentChannel?.pinned_messages?.length > 0) {
+      const pinnedMsgs = messages.filter(msg => 
+        currentChannel.pinned_messages.includes(msg.id) && msg.file
+      );
+      setPinnedMessages(pinnedMsgs);
+    } else {
+      setPinnedMessages([]);
+    }
+  }, [currentChannel?.pinned_messages, messages]);
+
+  const handlePinMessage = async (messageId) => {
+    try {
+      await dispatch(pinMessage({ channelId: currentChannel.id, messageId })).unwrap();
+      toast({
+        title: 'Message pinned',
+        status: 'success',
+        duration: 2000,
+        isClosable: true,
+      });
+    } catch (error) {
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to pin message',
+        status: 'error',
+        duration: 3000,
+        isClosable: true,
+      });
+    }
+  };
+
+  const handleUnpinMessage = async (messageId) => {
+    try {
+      await dispatch(unpinMessage({ channelId: currentChannel.id, messageId })).unwrap();
+      toast({
+        title: 'Message unpinned',
+        status: 'success',
+        duration: 2000,
+        isClosable: true,
+      });
+    } catch (error) {
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to unpin message',
+        status: 'error',
+        duration: 3000,
+        isClosable: true,
+      });
+    }
+  };
+
+  return (
+    <Grid templateColumns="250px 1fr" h="100vh" bg="gray.900">
+      {/* Existing sidebar */}
+      
+      {/* Main Chat Area */}
+      <Flex direction="column" bg="gray.900" overflow="hidden">
+        {/* Channel Header */}
+        {currentChannel && (
+          <Flex
+            h="64px"
+            px={6}
+            align="center"
+            justify="space-between"
+            borderBottom="1px"
+            borderColor="gray.700"
+            bg="gray.800"
+          >
+            <Flex align="center" gap={4}>
+              <Box>
+                <Flex align="center" gap={2}>
+                  <Text color="gray.400" fontSize="lg">#</Text>
+                  <Text color="white" fontWeight="medium" fontSize="lg">
+                    {currentChannel.name}
+                  </Text>
+                </Flex>
+                {currentChannel.description && (
+                  <Text color="gray.400" fontSize="sm">
+                    {currentChannel.description}
+                  </Text>
+                )}
+              </Box>
+            </Flex>
+            <HStack spacing={2}>
+              <Tooltip label="Pinned Files" placement="bottom">
+                <IconButton
+                  icon={<Icon as={AiOutlinePushpin} />}
+                  variant="ghost"
+                  colorScheme="whiteAlpha"
+                  size="sm"
+                  onClick={() => setShowPinnedFiles(true)}
+                />
+              </Tooltip>
+              {/* Existing buttons */}
+            </HStack>
+          </Flex>
+        )}
+
+        {/* Messages Area */}
+        <Box flex="1" overflowY="auto" px={6} py={4}>
+          {Array.isArray(messages) && messages.map((message) => {
+            console.log('Rendering message:', {
+              messageId: message.id,
+              username: message.username,
+              isPinned: currentChannel?.pinned_messages?.includes(message.id),
+              isOwner: message.sender_id === user?.id,
+              currentChannel: currentChannel?.id,
+              pinnedMessages: currentChannel?.pinned_messages
+            });
+
+            return (
+              <Box
+                key={`message-${message.id}`}
+                py={2}
+                px={4}
+                mx={-4}
+                _hover={{ bg: 'gray.800' }}
+                borderRadius="md"
+                position="relative"
+                role="group"
+              >
+                <Flex gap={3}>
+                  <Avatar
+                    size="sm"
+                    name={message.username}
+                    src={message.avatar_url}
+                  />
+                  <Box flex="1" minW={0}>
+                    <Flex align="center" justify="space-between">
+                      <Flex align="center" gap={2}>
+                        <Text fontWeight="bold" color="white">
+                          {message.username}
+                        </Text>
+                        <Text fontSize="xs" color="gray.400">
+                          {new Date(message.created_at).toLocaleTimeString([], {
+                            hour: '2-digit',
+                            minute: '2-digit',
+                            hour12: false
+                          })}
+                        </Text>
+                      </Flex>
+                      <Menu>
+                        <MenuButton
+                          as={IconButton}
+                          icon={<BsThreeDotsVertical />}
+                          variant="ghost"
+                          size="xs"
+                          color="gray.400"
+                          opacity="0"
+                          _groupHover={{ opacity: 1 }}
+                          _hover={{ color: 'white', bg: 'whiteAlpha.100' }}
+                        />
+                        <MenuList bg="gray.800" borderColor="gray.700">
+                          <MenuItem
+                            icon={currentChannel?.pinned_messages?.includes(message.id) ? 
+                              <AiFillPushpin /> : <AiOutlinePushpin />
+                            }
+                            onClick={() => {
+                              if (currentChannel?.pinned_messages?.includes(message.id)) {
+                                handleUnpinMessage(message.id);
+                              } else {
+                                handlePinMessage(message.id);
+                              }
+                            }}
+                            bg="gray.800"
+                            _hover={{ bg: 'gray.700' }}
+                            color="white"
+                          >
+                            {currentChannel?.pinned_messages?.includes(message.id) ? 'Unpin Message' : 'Pin Message'}
+                          </MenuItem>
+                          {message.sender_id === user?.id && (
+                            <>
+                              <MenuDivider borderColor="gray.700" />
+                              <MenuItem
+                                icon={<EditIcon />}
+                                onClick={() => setEditingMessage(message)}
+                                bg="gray.800"
+                                _hover={{ bg: 'gray.700' }}
+                                color="white"
+                              >
+                                Edit Message
+                              </MenuItem>
+                              <MenuItem
+                                icon={<DeleteIcon />}
+                                onClick={() => handleDeleteMessage(message.id)}
+                                bg="gray.800"
+                                _hover={{ bg: 'gray.700' }}
+                                color="red.300"
+                              >
+                                Delete Message
+                              </MenuItem>
+                            </>
+                          )}
+                        </MenuList>
+                      </Menu>
+                    </Flex>
+                    {message.file ? (
+                      <Box
+                        mt={2}
+                        p={3}
+                        bg="gray.700"
+                        borderRadius="md"
+                        maxW="300px"
+                        onClick={() => {
+                          const downloadUrl = message.file.download_url.replace(/^https?:\/\/[^/]+/i, '');
+                          downloadFile(downloadUrl);
+                        }}
+                        cursor="pointer"
+                        _hover={{ bg: 'gray.600' }}
+                      >
+                        <Flex align="center" gap={3}>
+                          <Icon as={AttachmentIcon} boxSize={5} color="blue.300" />
+                          <Box flex="1" minW={0}>
+                            <Text fontSize="sm" color="white" isTruncated>
+                              {message.file.filename}
+                            </Text>
+                            <Text fontSize="xs" color="gray.400">
+                              {formatFileSize(message.file.size)}
+                            </Text>
+                          </Box>
+                        </Flex>
+                      </Box>
+                    ) : (
+                      <Text color="gray.100" whiteSpace="pre-wrap">
+                        {message.content}
+                      </Text>
+                    )}
+                  </Box>
+                </Flex>
+              </Box>
+            );
+          })}
+          <div ref={messagesEndRef} />
+        </Box>
+
+        {/* Pinned Files Modal */}
+        <Modal isOpen={showPinnedFiles} onClose={() => setShowPinnedFiles(false)} size="xl">
+          <ModalOverlay />
+          <ModalContent bg="gray.800">
+            <ModalHeader borderBottom="1px" borderColor="gray.700" color="white">
+              Pinned Files
+            </ModalHeader>
+            <ModalCloseButton color="gray.400" />
+            <ModalBody py={6}>
+              {pinnedMessages.length > 0 ? (
+                <VStack spacing={4} align="stretch">
+                  {pinnedMessages.map(message => (
+                    <Box
+                      key={message.id}
+                      p={3}
+                      bg="gray.700"
+                      borderRadius="md"
+                    >
+                      <Flex align="center" gap={3}>
+                        <Icon as={AttachmentIcon} boxSize={5} color="blue.300" />
+                        <Box flex="1" minW={0}>
+                          <Text fontSize="sm" color="white" isTruncated>
+                            {message.file.filename}
+                          </Text>
+                          <HStack spacing={2}>
+                            <Text fontSize="xs" color="gray.400">
+                              {(message.file.size / 1024).toFixed(1)} KB
+                            </Text>
+                            <Text fontSize="xs" color="gray.400">•</Text>
+                            <Text fontSize="xs" color="gray.400">
+                              Pinned by {message.username}
+                            </Text>
+                          </HStack>
+                        </Box>
+                        <HStack>
+                          <IconButton
+                            icon={<Icon as={AiFillPushpin} />}
+                            size="sm"
+                            variant="ghost"
+                            colorScheme="green"
+                            onClick={() => handleUnpinMessage(message.id)}
+                            aria-label="Unpin file"
+                          />
+                        </HStack>
+                      </Flex>
+                    </Box>
+                  ))}
                 </VStack>
               ) : (
-                <Text color="white">{message.content}</Text>
+                <Text color="gray.400" textAlign="center">No pinned files in this channel</Text>
               )}
-            </Box>
-          </HStack>
-        </Box>
-      ))}
-      <div ref={messagesEndRef} />
-    </Box>
-    <MessageInput
-      onSendMessage={handleSendMessage}
-      currentChannel={currentChannel}
-      handleTyping={handleTyping}
-    />
-  </VStack>
-); 
+            </ModalBody>
+          </ModalContent>
+        </Modal>
+
+        {/* Existing modals */}
+      </Flex>
+    </Grid>
+  );
+};
+
+export default Chat; 

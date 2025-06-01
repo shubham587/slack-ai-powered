@@ -175,158 +175,149 @@ export const unpinMessage = createAsyncThunk(
 const channelsSlice = createSlice({
   name: 'channels',
   initialState: {
-    channels: [],
-    activeChannel: null,
-    loading: false,
+    channels: {},
+    isLoading: false,
     error: null,
-    channelMembers: {},
+    activeChannel: null,
     typingUsers: {},
   },
   reducers: {
+    addMemberToChannel: (state, action) => {
+      const { channel_id, user } = action.payload;
+      if (state.channels[channel_id] && !state.channels[channel_id].is_direct) {
+        if (!state.channels[channel_id].members) {
+          state.channels[channel_id].members = [];
+        }
+        state.channels[channel_id].members.push(user);
+      }
+    },
+    updateChannelData: (state, action) => {
+      const channel = action.payload;
+      if (!channel.is_direct || state.channels[channel.id]) {
+        state.channels[channel.id] = {
+          ...state.channels[channel.id],
+          ...channel,
+        };
+      }
+    },
     setChannels: (state, action) => {
-      state.channels = action.payload;
+      const channels = action.payload;
+      state.channels = channels.reduce((acc, channel) => {
+        acc[channel.id] = channel;
+        return acc;
+      }, {});
+    },
+    removeChannel: (state, action) => {
+      const channelId = action.payload;
+      delete state.channels[channelId];
     },
     setActiveChannel: (state, action) => {
       state.activeChannel = action.payload;
     },
     addTypingUser: (state, action) => {
-      const { channelId, user } = action.payload;
+      const { channelId, username } = action.payload;
       if (!state.typingUsers[channelId]) {
-        state.typingUsers[channelId] = {};
+        state.typingUsers[channelId] = new Set();
       }
-      state.typingUsers[channelId][user.id] = user;
+      state.typingUsers[channelId].add(username);
     },
     removeTypingUser: (state, action) => {
-      const { channelId, userId } = action.payload;
+      const { channelId, username } = action.payload;
       if (state.typingUsers[channelId]) {
-        delete state.typingUsers[channelId][userId];
+        state.typingUsers[channelId].delete(username);
       }
     },
     updateChannelLastMessage: (state, action) => {
-      const { channelId, lastMessageAt } = action.payload;
-      const channel = state.channels.find(c => c.id === channelId);
+      const { channelId, message } = action.payload;
+      const channel = state.channels[channelId];
       if (channel) {
-        channel.last_message_at = lastMessageAt;
+        channel.last_message = message;
+        channel.last_message_at = message.created_at;
       }
     },
     handleChannelCreated: (state, action) => {
-      state.channels.push(action.payload);
+      if (!action.payload.is_direct) {
+        state.channels[action.payload.id] = action.payload;
+      }
     },
     handleChannelUpdated: (state, action) => {
-      const index = state.channels.findIndex(c => c.id === action.payload.id);
-      if (index !== -1) {
-        state.channels[index] = action.payload;
+      const channel = action.payload;
+      if (!channel.is_direct || state.channels[channel.id]) {
+        state.channels[channel.id] = {
+          ...state.channels[channel.id],
+          ...channel,
+        };
       }
     },
     handleMemberAdded: (state, action) => {
-      const { channelId, userId } = action.payload;
-      const channel = state.channels.find(c => c.id === channelId);
+      const channel = state.channels[action.payload.channelId];
       if (channel) {
-        if (!channel.members.includes(userId)) {
-          channel.members.push(userId);
-        }
-      } else {
-        state.needsRefresh = true;
+        channel.members = channel.members || [];
+        channel.members.push(action.payload.member);
       }
     },
     handleMemberRemoved: (state, action) => {
-      const { channelId, userId } = action.payload;
-      const channel = state.channels.find(c => c.id === channelId);
+      const channel = state.channels[action.payload.channelId];
       if (channel) {
-        channel.members = channel.members.filter(m => m.id !== userId);
+        channel.members = channel.members.filter(m => m.id !== action.payload.memberId);
       }
     },
   },
   extraReducers: (builder) => {
     builder
-      // fetchChannels
       .addCase(fetchChannels.pending, (state) => {
-        state.loading = true;
+        state.isLoading = true;
         state.error = null;
       })
       .addCase(fetchChannels.fulfilled, (state, action) => {
-        state.loading = false;
-        state.channels = action.payload;
-        state.error = null;
+        state.isLoading = false;
+        state.channels = action.payload.reduce((acc, channel) => {
+          if (!channel.is_direct) {
+            acc[channel.id] = channel;
+          }
+          return acc;
+        }, {});
       })
       .addCase(fetchChannels.rejected, (state, action) => {
-        state.loading = false;
-        state.error = action.payload?.error || 'Failed to fetch channels';
-      })
-      // createChannel
-      .addCase(createChannel.pending, (state) => {
-        state.loading = true;
-        state.error = null;
-      })
-      .addCase(createChannel.fulfilled, (state, action) => {
-        state.loading = false;
-        state.channels.push(action.payload);
-        state.activeChannel = action.payload;
-        state.error = null;
-      })
-      .addCase(createChannel.rejected, (state, action) => {
-        state.loading = false;
-        state.error = action.payload?.error || 'Failed to create channel';
-      })
-      // updateChannel
-      .addCase(updateChannel.pending, (state) => {
-        state.loading = true;
-        state.error = null;
-      })
-      .addCase(updateChannel.fulfilled, (state, action) => {
-        state.loading = false;
-        const index = state.channels.findIndex(c => c.id === action.payload.id);
-        if (index !== -1) {
-          state.channels[index] = action.payload;
-          if (state.activeChannel?.id === action.payload.id) {
-            state.activeChannel = action.payload;
-          }
-        }
-        state.error = null;
-      })
-      .addCase(updateChannel.rejected, (state, action) => {
-        state.loading = false;
+        state.isLoading = false;
         state.error = action.payload;
       })
-      // addChannelMember
+      .addCase(createChannel.fulfilled, (state, action) => {
+        if (!action.payload.is_direct) {
+          state.channels[action.payload.id] = action.payload;
+        }
+      })
+      .addCase(updateChannel.fulfilled, (state, action) => {
+        state.channels[action.payload.id] = action.payload;
+      })
+      .addCase(updateChannel.rejected, (state, action) => {
+        state.isLoading = false;
+        state.error = action.payload;
+      })
       .addCase(addChannelMember.fulfilled, (state, action) => {
-        const index = state.channels.findIndex(c => c.id === action.payload.channelId);
-        if (index !== -1) {
-          state.channels[index] = action.payload.updatedChannel;
-        }
+        state.channels[action.payload.channelId] = action.payload.updatedChannel;
       })
-      // removeChannelMember
       .addCase(removeChannelMember.fulfilled, (state, action) => {
-        const index = state.channels.findIndex(c => c.id === action.payload.channelId);
-        if (index !== -1) {
-          state.channels[index] = action.payload;
-        }
+        delete state.channels[action.payload.channelId];
       })
-      // createDirectMessage
       .addCase(createDirectMessage.fulfilled, (state, action) => {
-        if (!state.channels.find(c => c.id === action.payload.id)) {
-          state.channels.push(action.payload);
-        }
+        // Don't add direct messages to the channels list
+        // They will be handled separately in the directMessages state
       })
-      // pinMessage
       .addCase(pinMessage.fulfilled, (state, action) => {
-        const index = state.channels.findIndex(c => c.id === action.payload.id);
-        if (index !== -1) {
-          state.channels[index] = action.payload;
-        }
+        state.channels[action.payload.id] = action.payload;
       })
-      // unpinMessage
       .addCase(unpinMessage.fulfilled, (state, action) => {
-        const index = state.channels.findIndex(c => c.id === action.payload.id);
-        if (index !== -1) {
-          state.channels[index] = action.payload;
-        }
+        state.channels[action.payload.id] = action.payload;
       });
   },
 });
 
 export const {
+  addMemberToChannel,
+  updateChannelData,
   setChannels,
+  removeChannel,
   setActiveChannel,
   addTypingUser,
   removeTypingUser,
@@ -338,20 +329,28 @@ export const {
 } = channelsSlice.actions;
 
 // Selectors
-export const selectChannels = state => state.channels.channels;
+export const selectChannels = (state) => Object.values(state.channels.channels);
 export const selectActiveChannel = state => state.channels.activeChannel;
-export const selectChannelById = (state, channelId) => 
-  state.channels.channels.find(c => c.id === channelId);
+export const selectChannelById = (state, channelId) => {
+  const channel = state.channels.channels[channelId];
+  if (!channel) return null;
+  
+  // Ensure members array exists and filter out any invalid members
+  return {
+    ...channel,
+    members: (channel.members || []).filter(member => member && member.id && member.username)
+  };
+};
 export const selectDirectMessageChannels = state => 
-  state.channels.channels.filter(c => c.is_direct);
+  Object.values(state.channels.channels).filter(c => c.is_direct);
 export const selectPublicChannels = state => 
-  state.channels.channels.filter(c => !c.is_private && !c.is_direct);
+  Object.values(state.channels.channels).filter(c => !c.is_private && !c.is_direct);
 export const selectPrivateChannels = state => 
-  state.channels.channels.filter(c => c.is_private && !c.is_direct);
+  Object.values(state.channels.channels).filter(c => c.is_private && !c.is_direct);
 export const selectTypingUsers = (state, channelId) => 
   state.channels.typingUsers[channelId] || {};
 export const selectChannelMembers = (state, channelId) => {
-  const channel = state.channels.channels.find(c => c.id === channelId);
+  const channel = state.channels.channels[channelId];
   return channel ? channel.members : [];
 };
 

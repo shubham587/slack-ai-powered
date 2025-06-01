@@ -1,5 +1,5 @@
 import { createSlice, createAsyncThunk } from '@reduxjs/toolkit';
-import { initializeSocket, getSocket } from '../../socket';
+import { initializeSocket, getSocket, disconnectSocket } from '../../socket';
 
 // Async thunks
 export const checkAuth = createAsyncThunk(
@@ -20,11 +20,13 @@ export const checkAuth = createAsyncThunk(
 
     if (!response.ok) {
       localStorage.removeItem('token');
+      localStorage.removeItem('userId');
       throw new Error('Invalid token');
     }
 
     const data = await response.json();
-    initializeSocket(token);
+    localStorage.setItem('userId', data.user.id);
+    initializeSocket(data.user.id);
     return data.user;
   }
 );
@@ -46,7 +48,8 @@ export const login = createAsyncThunk(
 
     const data = await response.json();
     localStorage.setItem('token', data.token);
-    initializeSocket(data.token);
+    localStorage.setItem('userId', data.user.id);
+    initializeSocket(data.user.id);
     return data.user;
   }
 );
@@ -68,7 +71,8 @@ export const register = createAsyncThunk(
 
     const data = await response.json();
     localStorage.setItem('token', data.token);
-    initializeSocket(data.token);
+    localStorage.setItem('userId', data.user.id);
+    initializeSocket(data.user.id);
     return data.user;
   }
 );
@@ -140,6 +144,7 @@ const authSlice = createSlice({
       state.user = null;
       state.isAuthenticated = false;
       localStorage.removeItem('token');
+      localStorage.removeItem('userId');
       const socket = getSocket();
       if (socket) {
         socket.disconnect();

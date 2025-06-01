@@ -2,26 +2,21 @@ import { configureStore } from '@reduxjs/toolkit';
 import { setupListeners } from '@reduxjs/toolkit/query';
 import { baseApi } from './api/baseApi';
 import authReducer from './slices/authSlice';
-import chatReducer from './slices/chatSlice';
-import uiReducer from './slices/uiSlice';
-import invitationsReducer from './slices/invitationsSlice';
 import channelsReducer from './slices/channelsSlice';
+import messagesReducer from './slices/messagesSlice';
+import invitationsReducer from './slices/invitationsSlice';
 
 export const store = configureStore({
   reducer: {
     [baseApi.reducerPath]: baseApi.reducer,
     auth: authReducer,
-    chat: chatReducer,
-    ui: uiReducer,
-    invitations: invitationsReducer,
     channels: channelsReducer,
+    messages: messagesReducer,
+    invitations: invitationsReducer,
   },
   middleware: (getDefaultMiddleware) =>
     getDefaultMiddleware({
-      serializableCheck: {
-        // Ignore these action types
-        ignoredActions: ['auth/login/fulfilled', 'auth/register/fulfilled'],
-      },
+      serializableCheck: false,
     }).concat(baseApi.middleware),
   devTools: process.env.NODE_ENV !== 'production',
 });

@@ -5,6 +5,7 @@ from app import db, socketio
 from bson import ObjectId
 from datetime import datetime
 from app.models.channel import Channel
+from flask import current_app
 
 bp = Blueprint('messages', __name__, url_prefix='/api/messages')
 
@@ -26,6 +27,21 @@ def get_channel_messages(channel_id):
             limit=limit,
             before=before
         )
+        
+        # Update reply counts for each message
+        for message in messages:
+            # Count actual replies
+            reply_count = db.messages.count_documents({
+                'parent_id': message._id
+            })
+            
+            # Update message if count is different
+            if reply_count != message.reply_count:
+                db.messages.update_one(
+                    {'_id': message._id},
+                    {'$set': {'reply_count': reply_count}}
+                )
+                message.reply_count = reply_count
         
         return jsonify([msg.to_response_dict() for msg in messages])
         
@@ -271,9 +287,20 @@ def update_message(message_id):
             db.messages.find_one({'_id': ObjectId(message_id)})
         )
         
-        # Emit update to channel
+        # Convert message to response format
         message_data = updated_message.to_response_dict()
+        
+        # Emit update to channel room
         socketio.emit('message_updated', message_data, room=str(updated_message.channel_id))
+        
+        # If this is a reply, also emit to thread room
+        if message.get('parent_id'):
+            thread_room = f'thread_{str(message["parent_id"])}'
+            socketio.emit('message_updated', message_data, room=thread_room)
+        
+        # Also emit to the message's own thread room if it has replies
+        thread_room = f'thread_{message_id}'
+        socketio.emit('message_updated', message_data, room=thread_room)
         
         return jsonify(message_data), 200
         
@@ -427,4 +454,102 @@ def send_direct_message(user_id):
         return jsonify(message_data), 201
         
     except Exception as e:
-        return jsonify({'error': str(e)}), 400 
+        return jsonify({'error': str(e)}), 400
+
+@bp.route('/<message_id>/replies', methods=['GET'], endpoint='get_replies')
+@jwt_required()
+def get_message_replies(message_id):
+    """Get all replies for a message"""
+    try:
+        # Validate message_id
+        if not ObjectId.is_valid(message_id):
+            return jsonify({'error': 'Invalid message ID'}), 400
+
+        # Get the parent message
+        parent_message = db.messages.find_one({'_id': ObjectId(message_id)})
+        if not parent_message:
+            return jsonify({'error': 'Message not found'}), 404
+
+        # Get replies
+        replies = list(db.messages.find(
+            {'parent_id': ObjectId(message_id)},
+            sort=[('created_at', 1)]
+        ))
+        
+        # Update the parent message's reply count to match actual count
+        actual_count = len(replies)
+        db.messages.update_one(
+            {'_id': ObjectId(message_id)},
+            {'$set': {'reply_count': actual_count}}
+        )
+        
+        # Get the updated parent message
+        updated_parent = db.messages.find_one({'_id': ObjectId(message_id)})
+        
+        # Convert to response format
+        replies_data = [Message.from_dict(reply).to_response_dict() for reply in replies]
+        
+        # Emit the updated reply count to all clients
+        socketio.emit('message_updated', Message.from_dict(updated_parent).to_response_dict(), 
+                     room=str(parent_message['channel_id']))
+        
+        return jsonify(replies_data), 200
+
+    except Exception as e:
+        current_app.logger.error(f"Error getting message replies: {str(e)}")
+        return jsonify({'error': 'Internal server error'}), 500
+
+@bp.route('/<message_id>/reply', methods=['POST'], endpoint='create_reply')
+@jwt_required()
+def create_message_reply(message_id):
+    """Create a reply to a message"""
+    try:
+        # Get current user ID
+        current_user_id = get_jwt_identity()
+        
+        # Validate message_id
+        if not ObjectId.is_valid(message_id):
+            return jsonify({'error': 'Invalid message ID'}), 400
+
+        # Get the parent message
+        parent_message = db.messages.find_one({'_id': ObjectId(message_id)})
+        if not parent_message:
+            return jsonify({'error': 'Parent message not found'}), 404
+
+        # Get request data
+        data = request.get_json()
+        if not data or 'content' not in data:
+            return jsonify({'error': 'Message content is required'}), 400
+
+        # Create the reply
+        reply = Message.create(
+            channel_id=parent_message['channel_id'],
+            sender_id=ObjectId(current_user_id),
+            content=data['content'],
+            parent_id=ObjectId(message_id)
+        )
+
+        # Convert to response format
+        reply_data = reply.to_response_dict()
+
+        # Emit socket event for real-time updates
+        # Emit to thread-specific room
+        thread_room = f'thread_{message_id}'
+        socketio.emit('new_reply', {
+            'message_id': message_id,
+            'reply': reply_data,
+            'parent_id': message_id
+        }, room=thread_room)
+
+        # Also emit to channel room for any other UI updates
+        socketio.emit('new_reply', {
+            'message_id': message_id,
+            'reply': reply_data,
+            'parent_id': message_id
+        }, room=str(parent_message['channel_id']))
+
+        return jsonify(reply_data), 201
+
+    except Exception as e:
+        current_app.logger.error(f"Error creating message reply: {str(e)}")
+        return jsonify({'error': str(e)}), 500 

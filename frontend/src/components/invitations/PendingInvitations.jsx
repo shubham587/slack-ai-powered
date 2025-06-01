@@ -25,8 +25,10 @@ const PendingInvitations = () => {
   const dispatch = useDispatch();
   const toast = useToast();
   const [actionLoading, setActionLoading] = useState({});
+  const currentUserId = localStorage.getItem('userId');
   
-  const pendingInvitations = useSelector(selectPendingInvitations) || [];
+  const allInvitations = useSelector(selectPendingInvitations) || [];
+  const pendingInvitations = allInvitations.filter(inv => inv.invitee_id === currentUserId);
   const isLoading = useSelector(selectInvitationsLoading);
   const error = useSelector(selectInvitationsError);
 
@@ -44,14 +46,17 @@ const PendingInvitations = () => {
     // Set up socket event listeners
     const handleNewInvitation = (data) => {
       console.log('Received new invitation:', data);
-      dispatch(addInvitation(data));
-      toast({
-        title: 'New Channel Invitation',
-        description: `You've been invited to join ${data.channel_name}`,
-        status: 'info',
-        duration: 5000,
-        isClosable: true,
-      });
+      // Only add invitation if current user is the invitee
+      if (data.invitee_id === currentUserId) {
+        dispatch(addInvitation(data));
+        toast({
+          title: 'New Channel Invitation',
+          description: `${data.inviter_username} invited you to join #${data.channel_name}`,
+          status: 'info',
+          duration: 5000,
+          isClosable: true,
+        });
+      }
     };
 
     socket.on('new_invitation', handleNewInvitation);
@@ -60,7 +65,7 @@ const PendingInvitations = () => {
     return () => {
       socket.off('new_invitation', handleNewInvitation);
     };
-  }, [dispatch, toast]);
+  }, [dispatch, toast, currentUserId]);
 
   const handleAccept = async (invitationId) => {
     try {
@@ -147,9 +152,12 @@ const PendingInvitations = () => {
           >
             <VStack align="stretch" spacing={3}>
               <Text color="white">
-                You've been invited to join{' '}
                 <Text as="span" fontWeight="bold">
-                  {invitation.channel_name}
+                  {invitation.inviter_username}
+                </Text>{' '}
+                invited you to join{' '}
+                <Text as="span" fontWeight="bold">
+                  #{invitation.channel_name}
                 </Text>
               </Text>
               <HStack spacing={2} justify="flex-end">

@@ -13,8 +13,21 @@ import { selectUser } from './store/slices/authSlice';
 const theme = extendTheme({
   styles: {
     global: {
+      'html, body': {
+        margin: 0,
+        padding: 0,
+        height: '100%',
+        width: '100%',
+        overflow: 'hidden',
+      },
+      '#root': {
+        height: '100vh',
+        width: '100vw',
+        overflow: 'hidden',
+      },
       body: {
-        bg: 'gray.50',
+        bg: 'gray.900',
+        color: 'white',
       },
     },
   },
@@ -46,16 +59,16 @@ const AuthenticatedContent = () => {
   const user = useSelector(selectUser);
   
   return (
-    <Box position="relative">
+    <Box position="relative" h="100vh" w="100vw" overflow="hidden">
       {user && (
         <Box position="fixed" top={4} right={4} zIndex={1000}>
           <PendingInvitations />
         </Box>
       )}
-      <div className="min-h-screen bg-primary-background">
+      <Box h="100%" w="100%" overflow="hidden">
         <AppRoutes />
         <Toast />
-      </div>
+      </Box>
     </Box>
   );
 };

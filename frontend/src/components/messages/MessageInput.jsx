@@ -15,19 +15,34 @@ import { AttachmentIcon, SmallCloseIcon } from '@chakra-ui/icons';
 import { FiSend } from 'react-icons/fi';
 import FileUpload from './FileUpload';
 
-const MessageInput = ({ onSendMessage, currentChannel, handleTyping }) => {
-  const [message, setMessage] = useState('');
+const MessageInput = ({ 
+  onSendMessage, 
+  currentChannel, 
+  handleTyping,
+  placeholder,
+  showAttachment = true,
+  initialMessage = '',
+  onCancel
+}) => {
+  const [message, setMessage] = useState(initialMessage);
   const [showFileUpload, setShowFileUpload] = useState(false);
   const [selectedFile, setSelectedFile] = useState(null);
   const toast = useToast();
+
+  // Update message when initialMessage changes
+  useEffect(() => {
+    setMessage(initialMessage);
+  }, [initialMessage]);
 
   // Add useEffect to clear file state when channel changes
   useEffect(() => {
     // Clear file state when changing channels
     setSelectedFile(null);
     setShowFileUpload(false);
-    setMessage('');
-  }, [currentChannel?.id]); // Only trigger when channel ID changes
+    if (!initialMessage) {
+      setMessage('');
+    }
+  }, [currentChannel?.id, initialMessage]); // Only trigger when channel ID changes
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -35,51 +50,17 @@ const MessageInput = ({ onSendMessage, currentChannel, handleTyping }) => {
     if (!message.trim() && !selectedFile) return;
     
     try {
-      // Debug current state
-      console.log('MessageInput State Debug:', {
-        hasMessage: Boolean(message.trim()),
-        messageLength: message.trim().length,
-        hasFile: Boolean(selectedFile),
-        fileDetails: selectedFile ? {
-          name: selectedFile.name,
-          type: selectedFile.type,
-          size: selectedFile.size,
-          lastModified: selectedFile.lastModified
-        } : null
-      });
-
-      // Create FormData if there's a file
       if (selectedFile) {
-        const formData = new FormData();
-        
-        // Always append the file first
-        formData.append('file', selectedFile);
-        
-        // Always append content, even if empty (backend expects it)
-        formData.append('content', message.trim() || '');
-        
-        // Log FormData contents for debugging
-        console.log('FormData Debug:', {
-          fileName: selectedFile.name,
-          fileType: selectedFile.type,
-          fileSize: selectedFile.size,
-          message: message.trim() || null,
-          formDataEntries: Array.from(formData.entries()).map(([key, value]) => {
-            if (value instanceof File) {
-              return [key, `File: ${value.name} (${value.size} bytes)`];
-            }
-            return [key, value];
-          })
-        });
-        
-        await onSendMessage(formData, true);
+        // For file uploads, send the file and content
+        await onSendMessage({
+          file: selectedFile,
+          content: message.trim()
+        }, true);
       } else {
-        console.log('Message Only Debug:', {
-          content: message.trim(),
-          length: message.trim().length
-        });
-        
-        await onSendMessage({ content: message.trim() }, false);
+        // For text-only messages
+        await onSendMessage({
+          content: message.trim()
+        }, false);
       }
       
       // Clear inputs after successful send
@@ -87,19 +68,7 @@ const MessageInput = ({ onSendMessage, currentChannel, handleTyping }) => {
       setSelectedFile(null);
       setShowFileUpload(false);
     } catch (error) {
-      console.error('MessageInput Error Debug:', {
-        error,
-        errorType: error.constructor.name,
-        errorMessage: error.message,
-        stack: error.stack,
-        selectedFile: selectedFile ? {
-          name: selectedFile.name,
-          type: selectedFile.type,
-          size: selectedFile.size
-        } : null,
-        message: message.trim() || null
-      });
-      
+      console.error('Error sending message:', error);
       toast({
         title: 'Error sending message',
         description: error.message || 'Failed to send message',
@@ -120,7 +89,7 @@ const MessageInput = ({ onSendMessage, currentChannel, handleTyping }) => {
   };
 
   return (
-    <Box>
+    <Box w="100%" maxW="100%">
       <Collapse in={showFileUpload}>
         <Box mb={4}>
           <FileUpload
@@ -131,8 +100,8 @@ const MessageInput = ({ onSendMessage, currentChannel, handleTyping }) => {
         </Box>
       </Collapse>
       
-      <form onSubmit={handleSubmit}>
-        <VStack spacing={3}>
+      <form onSubmit={handleSubmit} style={{ width: '100%' }}>
+        <VStack spacing={3} w="100%">
           {selectedFile && (
             <Flex
               w="100%"
@@ -142,7 +111,7 @@ const MessageInput = ({ onSendMessage, currentChannel, handleTyping }) => {
               alignItems="center"
               justifyContent="space-between"
             >
-              <Text fontSize="sm" color="gray.300">
+              <Text fontSize="sm" color="gray.300" isTruncated maxW="calc(100% - 40px)">
                 Attached: {selectedFile.name}
               </Text>
               <IconButton
@@ -151,42 +120,62 @@ const MessageInput = ({ onSendMessage, currentChannel, handleTyping }) => {
                 variant="ghost"
                 onClick={handleFileRemove}
                 aria-label="Remove file"
+                flexShrink={0}
               />
             </Flex>
           )}
           
           <HStack width="100%" spacing={2}>
-            <IconButton
-              icon={<AttachmentIcon />}
-              variant="ghost"
-              colorScheme="whiteAlpha"
-              onClick={() => setShowFileUpload(!showFileUpload)}
-              aria-label="Attach file"
-            />
+            {showAttachment && (
+              <IconButton
+                icon={<AttachmentIcon />}
+                variant="ghost"
+                colorScheme="whiteAlpha"
+                onClick={() => setShowFileUpload(!showFileUpload)}
+                aria-label="Attach file"
+                flexShrink={0}
+              />
+            )}
             <Input
               value={message}
               onChange={(e) => {
                 setMessage(e.target.value);
-                handleTyping();
+                handleTyping?.();
               }}
-              placeholder={currentChannel ? `Message #${currentChannel.name}` : 'Select a channel to start messaging'}
+              placeholder={placeholder || (currentChannel ? `Message #${currentChannel.name}` : 'Select a channel to start messaging')}
               size="lg"
-              bg="gray.800"
+              bg="white"
+              color="gray.800"
               border="1px"
-              borderColor="gray.600"
-              _hover={{ borderColor: 'gray.500' }}
+              borderColor="gray.300"
+              _hover={{ borderColor: 'gray.400' }}
               _focus={{ borderColor: 'blue.500', boxShadow: 'none' }}
-              _placeholder={{ color: 'gray.400' }}
+              _placeholder={{ color: 'gray.500' }}
               disabled={!currentChannel}
+              flex={1}
+              minW={0}
             />
             <Button
               colorScheme="blue"
               type="submit"
               disabled={!currentChannel || (!message.trim() && !selectedFile)}
               leftIcon={<FiSend />}
+              flexShrink={0}
             >
               Send
             </Button>
+            {onCancel && (
+              <Button
+                variant="ghost"
+                onClick={() => {
+                  setMessage('');
+                  onCancel();
+                }}
+                flexShrink={0}
+              >
+                Cancel
+              </Button>
+            )}
           </HStack>
         </VStack>
       </form>

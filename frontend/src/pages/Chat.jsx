@@ -28,6 +28,12 @@ import {
   Grid,
   useToast,
   Icon,
+  Menu,
+  MenuButton,
+  MenuList,
+  MenuItem,
+  MenuDivider,
+  VStack,
 } from '@chakra-ui/react';
 import {
   AddIcon,
@@ -50,6 +56,9 @@ import ChannelSettings from '../components/channels/ChannelSettings';
 import { fetchChannels, setActiveChannel, createChannel } from '../store/slices/channelsSlice';
 import { fetchPendingInvitations } from '../store/slices/invitationsSlice';
 import MessageInput from '../components/messages/MessageInput';
+import { BsThreeDotsVertical } from 'react-icons/bs';
+import { AiFillPushpin, AiOutlinePushpin } from 'react-icons/ai';
+import ThreadPanel from '../components/messages/ThreadPanel';
 
 const Chat = () => {
   const dispatch = useDispatch();
@@ -74,6 +83,9 @@ const Chat = () => {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [filteredChannels, setFilteredChannels] = useState([]);
+  const [pinnedMessages, setPinnedMessages] = useState([]);
+  const [showSidebar, setShowSidebar] = useState(true);
+  const [activeThread, setActiveThread] = useState(null);
 
   const scrollToBottom = () => {
     if (messagesEndRef.current) {
@@ -125,17 +137,23 @@ const Chat = () => {
       console.log('Received message:', data);
       const messageChannelId = data.channelId || data.channel_id;
       if (messageChannelId === currentChannel?.id) {
-        setMessages(prev => [...prev, data.message || data]);
+        const newMessage = {
+          ...data.message || data,
+          reply_count: (data.message || data).reply_count || 0,
+          is_direct: currentChannel.is_direct || false
+        };
+        
+        setMessages(prev => [...prev, newMessage]);
         setTimeout(() => {
           scrollToBottom();
         }, 100);
         
         // Update last message in directMessages list if it's a DM
-        if (currentChannel.isDirect) {
+        if (currentChannel.is_direct) {
           setDirectMessages(prev => 
             prev.map(dm => 
               dm.channel_id === messageChannelId 
-                ? { ...dm, last_message: data.message || data }
+                ? { ...dm, last_message: newMessage }
                 : dm
             )
           );
@@ -143,10 +161,23 @@ const Chat = () => {
       }
     };
 
+    const handleMessageUpdate = (data) => {
+      const updatedMessage = data.message || data;
+      setMessages(prev => prev.map(msg => 
+        msg.id === updatedMessage.id ? {
+          ...updatedMessage,
+          reply_count: updatedMessage.reply_count || 0,
+          is_direct: currentChannel?.is_direct || false
+        } : msg
+      ));
+    };
+
     socket.on('new_message', handleNewMessage);
+    socket.on('message_updated', handleMessageUpdate);
 
     return () => {
       socket.off('new_message', handleNewMessage);
+      socket.off('message_updated', handleMessageUpdate);
     };
   }, [user?.id, currentChannel?.id]);
 
@@ -173,10 +204,11 @@ const Chat = () => {
 
   useEffect(() => {
     // Filter channels based on search term
+    const channelsArray = Object.values(channels).filter(channel => !channel.is_direct); // Exclude DMs
     if (searchTerm.trim() === '') {
-      setFilteredChannels(channels);
+      setFilteredChannels(channelsArray);
     } else {
-      const filtered = channels.filter(channel => 
+      const filtered = channelsArray.filter(channel => 
         channel.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
         channel.description?.toLowerCase().includes(searchTerm.toLowerCase())
       );
@@ -184,15 +216,27 @@ const Chat = () => {
     }
   }, [searchTerm, channels]);
 
+  useEffect(() => {
+    if (currentChannel?.pinned_messages?.length > 0 && messages.length > 0) {
+      const pinned = messages.filter(msg => 
+        currentChannel.pinned_messages.includes(msg.id)
+      );
+      setPinnedMessages(pinned);
+    } else {
+      setPinnedMessages([]);
+    }
+  }, [currentChannel?.pinned_messages, messages]);
+
   const loadChannels = async () => {
     try {
       setIsLoading(true);
       const result = await dispatch(fetchChannels()).unwrap();
       
       // If we have channels but no current channel selected, select the first one
-      if (result.length > 0 && !currentChannel) {
-        console.log('Setting initial channel:', result[0]);
-        handleChannelSelect(result[0]);
+      const channelsArray = Object.values(result);
+      if (channelsArray.length > 0 && !currentChannel) {
+        console.log('Setting initial channel:', channelsArray[0]);
+        handleChannelSelect(channelsArray[0]);
       }
     } catch (error) {
       console.error('Error loading channels:', error);
@@ -234,8 +278,15 @@ const Chat = () => {
         return;
       }
 
-      // Sort messages by timestamp in ascending order
-      const sortedMessages = data.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+      // Sort messages by timestamp in ascending order and ensure reply_count is set
+      const sortedMessages = data
+        .sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
+        .map(msg => ({
+          ...msg,
+          reply_count: msg.reply_count || 0,
+          is_direct: currentChannel?.is_direct || false
+        }));
+
       setMessages(sortedMessages);
       
       // Scroll to bottom after messages are loaded
@@ -261,17 +312,39 @@ const Chat = () => {
       const url = `${import.meta.env.VITE_API_URL || 'http://localhost:5001'}/api/messages/channel/${currentChannel.id}`;
       const token = localStorage.getItem('token');
       
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          ...(hasFile ? {} : { 'Content-Type': 'application/json' }),
-        },
-        body: hasFile ? messageData : JSON.stringify({ content: messageData.content }),
-      });
+      let response;
+      
+      if (hasFile) {
+        // Handle file upload with FormData
+        const formData = new FormData();
+        formData.append('file', messageData.file);
+        formData.append('content', messageData.content || '');
+        
+        response = await fetch(url, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${token}`
+            // Don't set Content-Type for FormData, browser will set it automatically with boundary
+          },
+          body: formData
+        });
+      } else {
+        // Handle text-only message
+        response = await fetch(url, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            content: messageData.content
+          })
+        });
+      }
       
       if (!response.ok) {
-        throw new Error('Failed to send message');
+        const errorData = await response.json().catch(() => ({ error: 'Failed to send message' }));
+        throw new Error(errorData.error || 'Failed to send message');
       }
       
       const data = await response.json();
@@ -282,6 +355,8 @@ const Chat = () => {
         channelId: currentChannel.id,
         message: data
       });
+      
+      return data;
     } catch (error) {
       console.error('Error sending message:', error);
       throw error;
@@ -378,6 +453,74 @@ const Chat = () => {
     }
   };
 
+  const handlePinMessage = async (messageId) => {
+    try {
+      const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5001'}/api/channels/${currentChannel.id}/pin/${messageId}`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to pin message');
+      }
+
+      const updatedChannel = await response.json();
+      setCurrentChannel(updatedChannel);
+      
+      toast({
+        title: 'Message pinned',
+        status: 'success',
+        duration: 2000,
+        isClosable: true,
+      });
+    } catch (error) {
+      console.error('Error pinning message:', error);
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to pin message',
+        status: 'error',
+        duration: 3000,
+        isClosable: true,
+      });
+    }
+  };
+
+  const handleUnpinMessage = async (messageId) => {
+    try {
+      const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5001'}/api/channels/${currentChannel.id}/unpin/${messageId}`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to unpin message');
+      }
+
+      const updatedChannel = await response.json();
+      setCurrentChannel(updatedChannel);
+      
+      toast({
+        title: 'Message unpinned',
+        status: 'success',
+        duration: 2000,
+        isClosable: true,
+      });
+    } catch (error) {
+      console.error('Error unpinning message:', error);
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to unpin message',
+        status: 'error',
+        duration: 3000,
+        isClosable: true,
+      });
+    }
+  };
+
   const handleCreateChannel = async () => {
     try {
       const result = await dispatch(createChannel(newChannelData)).unwrap();
@@ -401,6 +544,13 @@ const Chat = () => {
   // Channel selection handler
   const handleChannelSelect = (channel) => {
     console.log('Selecting channel:', channel);
+    
+    // Only close thread if it's from a different channel
+    if (activeThread && activeThread.channel_id !== channel.id) {
+      setShowThreadPanel(false);
+      setActiveThread(null);
+    }
+    
     setCurrentChannel(channel);
     if (channel?.id) {
       joinChannel(channel.id);
@@ -455,24 +605,73 @@ const Chat = () => {
       // Create a virtual channel for direct messages
       const dmChannel = {
         id: data.channel_id,
-        name: user.username,
-        isDirect: true,
+        name: user.display_name || user.username,
+        is_direct: true,
         members: [user.id],
         avatar_url: user.avatar_url,
-        display_name: user.display_name || user.username
+        display_name: user.display_name || user.username,
+        description: `Direct message with ${user.display_name || user.username}`
       };
 
       setCurrentChannel(dmChannel);
-      setMessages(data.messages || []);
+      
+      // Ensure messages have the is_direct flag
+      const messagesWithDmFlag = (data.messages || []).map(msg => ({
+        ...msg,
+        is_direct: true
+      }));
+      setMessages(messagesWithDmFlag);
+      
       setIsDirectMessageOpen(false);
       
       // Join the DM channel socket room
-      joinChannel(data.channel_id);
+      const socket = getSocket();
+      if (socket) {
+        socket.emit('join', { channel: data.channel_id });
+      }
+
       scrollToBottom();
     } catch (error) {
       console.error('Error loading direct messages:', error);
+      toast({
+        title: 'Error',
+        description: 'Failed to load direct messages',
+        status: 'error',
+        duration: 3000,
+        isClosable: true,
+      });
     }
   };
+
+  // Add socket event listener for DM updates
+  useEffect(() => {
+    const socket = getSocket();
+    if (!socket) return;
+
+    const handleDirectMessage = (data) => {
+      // Update messages if we're in the same DM channel
+      if (currentChannel?.is_direct && data.channel_id === currentChannel.id) {
+        setMessages(prev => [...prev, data]);
+        scrollToBottom();
+      }
+
+      // Update the direct messages list
+      setDirectMessages(prev => {
+        const otherUserId = data.sender_id === user?.id ? data.recipient_id : data.sender_id;
+        return prev.map(dm => 
+          dm.user.id === otherUserId
+            ? { ...dm, last_message: data }
+            : dm
+        );
+      });
+    };
+
+    socket.on('new_direct_message', handleDirectMessage);
+
+    return () => {
+      socket.off('new_direct_message', handleDirectMessage);
+    };
+  }, [currentChannel, user]);
 
   // Add downloadFile function
   const downloadFile = async (fileUrl) => {
@@ -583,10 +782,249 @@ const Chat = () => {
     }
   };
 
+  // Add this function to handle thread opening
+  const handleThreadOpen = (message) => {
+    // Ensure the message has the current channel ID and type
+    const messageWithChannel = {
+      ...message,
+      channel_id: currentChannel.id,
+      is_direct: currentChannel.is_direct || false
+    };
+    setActiveThread(messageWithChannel);
+    setShowThreadPanel(true);
+  };
+
+  // Update the handleNewReply function to immediately update the UI
+  const handleNewReply = (reply) => {
+    const parentId = reply.parent_id;
+    if (!parentId) return;
+
+    // Immediately update the parent message's reply count
+    setMessages(prev => prev.map(msg => 
+      msg.id === parentId
+        ? {
+            ...msg,
+            reply_count: (msg.reply_count || 0) + 1,
+            is_direct: currentChannel?.is_direct || false
+          }
+        : msg
+    ));
+
+    // If this is a DM, update the directMessages list
+    if (currentChannel?.is_direct) {
+      setDirectMessages(prev => 
+        prev.map(dm => 
+          dm.channel_id === currentChannel.id
+            ? {
+                ...dm,
+                last_message: {
+                  ...dm.last_message,
+                  reply_count: ((dm.last_message?.reply_count || 0) + 1)
+                }
+              }
+            : dm
+        )
+      );
+    }
+  };
+
+  // Update the renderMessage function to include a download button for files
+  const renderMessage = (message, isPinned = false) => (
+    <Box
+      key={`message-${message.id}-${isPinned ? 'pinned' : 'regular'}`}
+      py={2}
+      px={4}
+      mx={-4}
+      bg={isPinned ? 'gray.800' : 'transparent'}
+      _hover={{ bg: isPinned ? 'gray.700' : 'gray.800' }}
+      borderRadius="md"
+      role="group"
+      position="relative"
+      borderLeft={currentChannel?.pinned_messages?.includes(message.id) ? '4px solid' : 'none'}
+      borderLeftColor={currentChannel?.pinned_messages?.includes(message.id) ? 'blue.400' : 'transparent'}
+    >
+      <Flex gap={3}>
+        <Avatar
+          size="sm"
+          name={message.username}
+          src={message.avatar_url}
+        />
+        <Box flex="1" minW={0}>
+          <Flex align="center" justify="space-between">
+            <Flex align="center" gap={2}>
+              <Text fontWeight="bold" color="white">
+                {message.username}
+              </Text>
+              <Text fontSize="xs" color="gray.400">
+                {new Date(message.created_at).toLocaleTimeString([], {
+                  hour: '2-digit',
+                  minute: '2-digit',
+                  hour12: false
+                })}
+              </Text>
+              {currentChannel?.pinned_messages?.includes(message.id) && (
+                <Flex align="center" gap={1}>
+                  <Icon as={AiFillPushpin} color="blue.400" boxSize={3} />
+                  <Text fontSize="xs" color="blue.400">Pinned</Text>
+                </Flex>
+              )}
+              {message.reply_count > 0 && (
+                <Text 
+                  fontSize="xs" 
+                  color="blue.300" 
+                  cursor="pointer"
+                  onClick={() => handleThreadOpen(message)}
+                >
+                  {message.reply_count} {message.reply_count === 1 ? 'reply' : 'replies'}
+                </Text>
+              )}
+            </Flex>
+            <Menu>
+              <MenuButton
+                as={IconButton}
+                icon={<BsThreeDotsVertical />}
+                variant="ghost"
+                size="xs"
+                color="gray.400"
+                opacity="0"
+                _groupHover={{ opacity: 1 }}
+                _hover={{ color: 'white', bg: 'whiteAlpha.100' }}
+              />
+              <MenuList bg="gray.800" borderColor="gray.700">
+                <MenuItem
+                  icon={<ChatIcon />}
+                  onClick={() => handleThreadOpen(message)}
+                  bg="gray.800"
+                  _hover={{ bg: 'gray.700' }}
+                  color="white"
+                >
+                  Reply in Thread
+                </MenuItem>
+                <MenuItem
+                  icon={currentChannel?.pinned_messages?.includes(message.id) ? 
+                    <AiFillPushpin /> : <AiOutlinePushpin />
+                  }
+                  onClick={() => {
+                    if (currentChannel?.pinned_messages?.includes(message.id)) {
+                      handleUnpinMessage(message.id);
+                    } else {
+                      handlePinMessage(message.id);
+                    }
+                  }}
+                  bg="gray.800"
+                  _hover={{ bg: 'gray.700' }}
+                  color="white"
+                >
+                  {currentChannel?.pinned_messages?.includes(message.id) ? 'Unpin Message' : 'Pin Message'}
+                </MenuItem>
+                {message.sender_id === user?.id && (
+                  <>
+                    <MenuDivider borderColor="gray.700" />
+                    <MenuItem
+                      icon={<EditIcon />}
+                      onClick={() => setEditingMessage(message)}
+                      bg="gray.800"
+                      _hover={{ bg: 'gray.700' }}
+                      color="white"
+                    >
+                      Edit Message
+                    </MenuItem>
+                    <MenuItem
+                      icon={<DeleteIcon />}
+                      onClick={() => handleDeleteMessage(message.id)}
+                      bg="gray.800"
+                      _hover={{ bg: 'gray.700' }}
+                      color="red.300"
+                    >
+                      Delete Message
+                    </MenuItem>
+                  </>
+                )}
+              </MenuList>
+            </Menu>
+          </Flex>
+          {message.file ? (
+            <Box
+              mt={2}
+              p={3}
+              bg="gray.700"
+              borderRadius="md"
+              maxW="300px"
+            >
+              <VStack spacing={2} align="stretch">
+                <Flex align="center" gap={3}>
+                  <Icon as={AttachmentIcon} boxSize={5} color="blue.300" />
+                  <Box flex="1" minW={0}>
+                    <Text fontSize="sm" color="white" isTruncated>
+                      {message.file.filename}
+                    </Text>
+                    <Text fontSize="xs" color="gray.400">
+                      {(message.file.size / 1024).toFixed(1)} KB
+                    </Text>
+                  </Box>
+                </Flex>
+                <Flex justify="flex-end" gap={2}>
+                  <Button
+                    size="sm"
+                    leftIcon={<DownloadIcon />}
+                    onClick={() => downloadFile(message.file.download_url)}
+                    variant="ghost"
+                    colorScheme="blue"
+                  >
+                    Download
+                  </Button>
+                </Flex>
+              </VStack>
+            </Box>
+          ) : (
+            <Text color="gray.100" whiteSpace="pre-wrap">
+              {message.content}
+            </Text>
+          )}
+        </Box>
+      </Flex>
+    </Box>
+  );
+
   return (
-    <Grid templateColumns="250px 1fr" h="100vh" bg="gray.900">
+    <Grid 
+      templateColumns={{ base: "1fr", md: "250px 1fr" }} 
+      h="100vh" 
+      w="100vw"
+      maxW="100vw"
+      maxH="100vh"
+      overflow="hidden"
+      bg="gray.900"
+      position="fixed"
+      top="0"
+      left="0"
+    >
       {/* Sidebar */}
-      <Box bg="gray.800" borderRight="1px" borderColor="gray.700" overflow="hidden" display="flex" flexDirection="column">
+      <Box 
+        bg="gray.800" 
+        borderRight="1px" 
+        borderColor="gray.700" 
+        overflow="hidden" 
+        display={{ base: showSidebar ? 'flex' : 'none', md: 'flex' }}
+        flexDirection="column"
+        w={{ base: "100%", md: "250px" }}
+        minW={{ base: "100%", md: "250px" }}
+        position={{ base: "absolute", md: "relative" }}
+        zIndex={{ base: 10, md: 1 }}
+        h="100%"
+      >
+        {/* Add mobile close button */}
+        <IconButton
+          icon={<CloseIcon />}
+          display={{ base: 'block', md: 'none' }}
+          position="absolute"
+          right={2}
+          top={2}
+          size="sm"
+          onClick={() => setShowSidebar(false)}
+          zIndex={2}
+        />
+        
         {/* Workspace Header */}
         <Flex p={4} borderBottom="1px" borderColor="gray.700" align="center" justify="space-between" bg="gray.800">
           <Text key="workspace-title" color="white" fontWeight="bold" fontSize="lg">Workspace</Text>
@@ -720,7 +1158,26 @@ const Chat = () => {
       </Box>
 
       {/* Main Chat Area */}
-      <Flex direction="column" bg="gray.900" overflow="hidden">
+      <Flex 
+        direction="column" 
+        bg="gray.900" 
+        overflow="hidden"
+        w="100%"
+        h="100%"
+        position="relative"
+      >
+        {/* Mobile menu button */}
+        <IconButton
+          icon={<HamburgerIcon />}
+          display={{ base: 'block', md: 'none' }}
+          position="absolute"
+          left={4}
+          top={4}
+          size="sm"
+          onClick={() => setShowSidebar(true)}
+          zIndex={2}
+        />
+
         {/* Channel Header */}
         {currentChannel && (
           <Flex
@@ -731,6 +1188,7 @@ const Chat = () => {
             borderBottom="1px"
             borderColor="gray.700"
             bg="gray.800"
+            w="100%"
           >
             <Flex align="center" gap={4}>
               <Box>
@@ -773,8 +1231,8 @@ const Chat = () => {
         )}
 
         {/* Messages Area */}
-        <Flex flex="1" overflow="hidden">
-          <Box flex="1" display="flex" flexDirection="column" minW={0}>
+        <Flex flex="1" overflow="hidden" maxW="100%">
+          <Box flex="1" display="flex" flexDirection="column" minW={0} maxW="100%">
             {/* Messages List */}
             <Box 
               flex="1" 
@@ -782,6 +1240,7 @@ const Chat = () => {
               px={6} 
               py={4} 
               className="custom-scrollbar"
+              maxW="100%"
               css={{
                 '&::-webkit-scrollbar': {
                   width: '8px',
@@ -799,127 +1258,103 @@ const Chat = () => {
               }}
             >
               <Box spacing={4} display="flex" flexDirection="column" minHeight="100%">
-                <Box flex="1" />
-                {Array.isArray(messages) && messages.map((message) => (
-                  <Box
-                    key={`message-container-${message._id || message.id}`}
-                    py={2}
-                    px={4}
-                    mx={-4}
-                    _hover={{ bg: 'gray.800' }}
-                    borderRadius="md"
-                    transition="background 0.2s"
-                    role="group"
-                  >
-                    <Flex key={`message-flex-${message._id || message.id}`} gap={3}>
-                      <Avatar
-                        key={`message-avatar-${message._id || message.id}`}
-                        size="sm"
-                        name={message.username}
-                        src={message.avatar_url}
-                      />
-                      <Box key={`message-content-${message._id || message.id}`} flex="1" minW={0}>
-                        <Flex key={`message-header-${message._id || message.id}`} align="baseline" gap={2}>
-                          <Text key={`message-username-${message._id || message.id}`} fontWeight="bold" color="white">
-                            {message.username}
-                          </Text>
-                          <Text key={`message-time-${message._id || message.id}`} fontSize="xs" color="gray.400">
-                            {new Date(message.created_at).toLocaleTimeString([], {
-                              hour: '2-digit',
-                              minute: '2-digit',
-                              hour12: false
-                            })}
-                          </Text>
-                        </Flex>
-                        {editingMessage?.id === message.id ? (
-                          <form key={`message-edit-form-${message._id || message.id}`} onSubmit={(e) => {
-                            e.preventDefault();
-                            handleEditMessage(message.id, editingMessage.content);
-                          }}>
-                            <Input
-                              key={`message-edit-input-${message._id || message.id}`}
-                              value={editingMessage.content}
-                              onChange={(e) => setEditingMessage({
-                                ...editingMessage,
-                                content: e.target.value
-                              })}
-                              mt={1}
-                              size="sm"
-                              autoFocus
-                            />
-                          </form>
-                        ) : (
-                          <>
-                            <Text key={`message-text-${message._id || message.id}`} color="gray.100" whiteSpace="pre-wrap">
-                              {message.content}
-                            </Text>
-                            {message.file && (
-                              <Box
-                                key={`message-file-${message._id || message.id}`}
-                                mt={2}
-                                p={3}
-                                bg="gray.700"
-                                borderRadius="md"
-                                maxW="300px"
-                              >
-                                <Flex align="center" gap={3}>
-                                  <Icon as={AttachmentIcon} boxSize={5} color="blue.300" />
-                                  <Box flex="1" minW={0}>
-                                    <Text fontSize="sm" color="white" isTruncated>
-                                      {message.file.filename}
-                                    </Text>
-                                    <Text fontSize="xs" color="gray.400">
-                                      {(message.file.size / 1024).toFixed(1)} KB
-                                    </Text>
-                                  </Box>
-                                  <IconButton
-                                    icon={<DownloadIcon />}
-                                    size="sm"
-                                    variant="ghost"
-                                    colorScheme="blue"
-                                    onClick={() => {
-                                      // Remove any existing absolute URL to ensure we use our base URL
-                                      const downloadUrl = message.file.download_url.replace(/^https?:\/\/[^/]+/i, '');
-                                      console.log('Initiating download for:', downloadUrl);
-                                      downloadFile(downloadUrl);
-                                    }}
-                                    aria-label="Download file"
-                                  />
-                                </Flex>
-                              </Box>
-                            )}
-                          </>
-                        )}
-                      </Box>
-                      {message.sender_id === user?.id && (
-                        <HStack key={`message-actions-${message._id || message.id}`} spacing={1} opacity={0} _groupHover={{ opacity: 1 }} transition="opacity 0.2s">
-                          <IconButton
-                            key={`message-edit-btn-${message._id || message.id}`}
-                            icon={<EditIcon />}
-                            size="xs"
-                            variant="ghost"
-                            colorScheme="whiteAlpha"
-                            onClick={() => setEditingMessage(message)}
-                          />
-                          <IconButton
-                            key={`message-delete-btn-${message._id || message.id}`}
-                            icon={<DeleteIcon />}
-                            size="xs"
-                            variant="ghost"
-                            colorScheme="red"
-                            onClick={() => handleDeleteMessage(message.id)}
-                          />
-                        </HStack>
-                      )}
+                {/* Pinned Messages Section */}
+                {pinnedMessages.length > 0 && (
+                  <Box mb={6} bg="gray.800" p={4} borderRadius="md" position="sticky" top={0} zIndex={1}>
+                    <Flex align="center" gap={2} mb={4}>
+                      <Icon as={AiFillPushpin} color="blue.400" />
+                      <Text color="white" fontWeight="medium">Pinned Messages</Text>
+                      <Text color="gray.400" fontSize="sm">({pinnedMessages.length})</Text>
                     </Flex>
+                    <VStack spacing={2} align="stretch">
+                      {pinnedMessages.map(message => (
+                        <Box
+                          key={`pinned-${message.id}`}
+                          p={2}
+                          borderRadius="md"
+                          bg="gray.700"
+                          borderLeft="4px solid"
+                          borderLeftColor="blue.400"
+                        >
+                          <Flex gap={3}>
+                            <Avatar
+                              size="sm"
+                              name={message.username}
+                              src={message.avatar_url}
+                            />
+                            <Box flex="1" minW={0}>
+                              <Flex align="center" gap={2}>
+                                <Text fontWeight="bold" color="white">
+                                  {message.username}
+                                </Text>
+                                <Text fontSize="xs" color="gray.400">
+                                  {new Date(message.created_at).toLocaleTimeString([], {
+                                    hour: '2-digit',
+                                    minute: '2-digit',
+                                    hour12: false
+                                  })}
+                                </Text>
+                              </Flex>
+                              {message.file ? (
+                                <Box
+                                  mt={2}
+                                  p={2}
+                                  bg="gray.600"
+                                  borderRadius="md"
+                                  maxW="300px"
+                                >
+                                  <VStack spacing={2} align="stretch">
+                                    <Flex align="center" gap={3}>
+                                      <Icon as={AttachmentIcon} boxSize={4} color="blue.300" />
+                                      <Box flex="1" minW={0}>
+                                        <Text fontSize="sm" color="white" isTruncated>
+                                          {message.file.filename}
+                                        </Text>
+                                        <Text fontSize="xs" color="gray.400">
+                                          {(message.file.size / 1024).toFixed(1)} KB
+                                        </Text>
+                                      </Box>
+                                    </Flex>
+                                    <Button
+                                      size="sm"
+                                      leftIcon={<DownloadIcon />}
+                                      onClick={() => downloadFile(message.file.download_url)}
+                                      variant="ghost"
+                                      colorScheme="blue"
+                                    >
+                                      Download
+                                    </Button>
+                                  </VStack>
+                                </Box>
+                              ) : (
+                                <Text color="gray.100" whiteSpace="pre-wrap">
+                                  {message.content}
+                                </Text>
+                              )}
+                            </Box>
+                          </Flex>
+                        </Box>
+                      ))}
+                    </VStack>
                   </Box>
-                ))}
+                )}
+                
+                <Box flex="1" />
+                {/* Regular Messages */}
+                {Array.isArray(messages) && messages.map(message => renderMessage(message, false))}
                 <div ref={messagesEndRef} />
               </Box>
             </Box>
 
             {/* Message Input */}
-            <Box key="message-input-container" px={6} py={4} borderTop="1px" borderColor="gray.700">
+            <Box 
+              key="message-input-container" 
+              px={6} 
+              py={4} 
+              borderTop="1px" 
+              borderColor="gray.700"
+              maxW="100%"
+            >
               <MessageInput
                 onSendMessage={handleSendMessage}
                 currentChannel={currentChannel}
@@ -930,21 +1365,27 @@ const Chat = () => {
 
           {/* Thread Panel */}
           {showThreadPanel && (
-            <Box w="400px" borderLeft="1px" borderColor="gray.700" bg="gray.800">
-              <Flex h="64px" px={4} align="center" justify="space-between" borderBottom="1px" borderColor="gray.700">
-                <Text key="thread-title" color="white" fontWeight="medium">Thread</Text>
-                <IconButton
-                  key="close-thread-button"
-                  icon={<CloseIcon />}
-                  size="sm"
-                  variant="ghost"
-                  colorScheme="whiteAlpha"
-                  onClick={() => setShowThreadPanel(false)}
-                />
-              </Flex>
-              <Box p={4}>
-                <Text key="no-thread-text" color="gray.400" textAlign="center">No thread selected</Text>
-              </Box>
+            <Box 
+              w={{ base: "100%", lg: "400px" }}
+              minW={{ base: "100%", lg: "400px" }}
+              borderLeft="1px" 
+              borderColor="gray.700" 
+              bg="gray.800"
+              position={{ base: "absolute", lg: "relative" }}
+              right={0}
+              top={0}
+              h="100%"
+              zIndex={5}
+            >
+              <ThreadPanel
+                parentMessage={activeThread}
+                onClose={() => {
+                  setShowThreadPanel(false);
+                  setActiveThread(null);
+                }}
+                onSendReply={handleNewReply}
+                currentChannel={currentChannel}
+              />
             </Box>
           )}
         </Flex>
