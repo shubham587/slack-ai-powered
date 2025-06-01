@@ -6,6 +6,8 @@ import { store } from './store';
 import AppRoutes from './routes';
 import Toast from './components/common/Toast';
 import PendingInvitations from './components/invitations/PendingInvitations';
+import { useSelector } from 'react-redux';
+import { selectUser } from './store/slices/authSlice';
 
 // Extend Chakra UI theme
 const theme = extendTheme({
@@ -39,20 +41,31 @@ const theme = extendTheme({
   },
 });
 
+// Create a wrapper component for authenticated content
+const AuthenticatedContent = () => {
+  const user = useSelector(selectUser);
+  
+  return (
+    <Box position="relative">
+      {user && (
+        <Box position="fixed" top={4} right={4} zIndex={1000}>
+          <PendingInvitations />
+        </Box>
+      )}
+      <div className="min-h-screen bg-primary-background">
+        <AppRoutes />
+        <Toast />
+      </div>
+    </Box>
+  );
+};
+
 const App = () => {
   return (
     <ChakraProvider theme={theme}>
       <Provider store={store}>
         <Router>
-          <Box position="relative">
-            <Box position="fixed" top={4} right={4} zIndex={1000}>
-              <PendingInvitations />
-            </Box>
-            <div className="min-h-screen bg-primary-background">
-              <AppRoutes />
-              <Toast />
-            </div>
-          </Box>
+          <AuthenticatedContent />
         </Router>
       </Provider>
     </ChakraProvider>

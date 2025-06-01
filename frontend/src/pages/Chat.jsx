@@ -68,6 +68,8 @@ const Chat = () => {
   const messagesEndRef = useRef(null);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [filteredChannels, setFilteredChannels] = useState([]);
 
   const scrollToBottom = () => {
     if (messagesEndRef.current) {
@@ -164,6 +166,19 @@ const Chat = () => {
       scrollToBottom();
     }
   }, [currentChannel]);
+
+  useEffect(() => {
+    // Filter channels based on search term
+    if (searchTerm.trim() === '') {
+      setFilteredChannels(channels);
+    } else {
+      const filtered = channels.filter(channel => 
+        channel.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        channel.description?.toLowerCase().includes(searchTerm.toLowerCase())
+      );
+      setFilteredChannels(filtered);
+    }
+  }, [searchTerm, channels]);
 
   const loadChannels = async () => {
     try {
@@ -495,6 +510,8 @@ const Chat = () => {
               </InputLeftElement>
               <Input
                 key="search-input"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
                 placeholder="Search channels"
                 bg="gray.700"
                 border="1px"
@@ -520,7 +537,7 @@ const Chat = () => {
               />
             </Flex>
             <Box>
-              {channels.map((channel, index) => (
+              {filteredChannels.map((channel, index) => (
                 <Button
                   key={`channel-${channel.id}-${index}`}
                   onClick={() => handleChannelSelect(channel)}
