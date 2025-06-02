@@ -9,6 +9,7 @@ import traceback
 from flask_cors import CORS, cross_origin
 import json
 from datetime import datetime
+import os
 
 ai_bp = Blueprint('ai', __name__)
 
@@ -16,7 +17,7 @@ ai_bp = Blueprint('ai', __name__)
 CORS(ai_bp, 
     resources={
         r"/*": {
-            "origins": ["http://localhost:5173"],
+            "origins": [os.getenv('FRONTEND_URL', 'http://localhost:5173')],
             "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
             "allow_headers": ["Content-Type", "Authorization"],
             "supports_credentials": True,
@@ -62,7 +63,8 @@ def serialize_mongodb_obj(obj):
 @ai_bp.after_request
 def after_request(response):
     origin = request.headers.get('Origin')
-    if origin == 'http://localhost:5173':
+    allowed_origin = os.getenv('FRONTEND_URL', 'http://localhost:5173')
+    if origin == allowed_origin:
         response.headers['Access-Control-Allow-Origin'] = origin
         response.headers['Access-Control-Allow-Credentials'] = 'true'
         response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS'
