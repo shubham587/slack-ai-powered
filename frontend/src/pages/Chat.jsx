@@ -840,7 +840,7 @@ const Chat = () => {
       channel_id: currentChannel.id,
       is_direct: currentChannel.is_direct || false,
       is_improvement: false, // This is a reply, not an improvement
-      useFullContext: false // Don't use thread context
+      useFullContext: true // Use full thread context
     };
     setActiveThread(messageWithChannel);
     setShowThreadPanel(true);
@@ -1011,15 +1011,6 @@ const Chat = () => {
                         color="white"
                       >
                         Quick Reply Suggestion
-                      </MenuItem>
-                      <MenuItem
-                        icon={<AiOutlineRobot />}
-                        onClick={() => handleSuggestReplyWithContext(message)}
-                        bg="gray.800"
-                        _hover={{ bg: "gray.700" }}
-                        color="white"
-                      >
-                        Contextual Reply Suggestion
                       </MenuItem>
                     </>
                   )}

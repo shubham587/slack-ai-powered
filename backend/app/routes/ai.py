@@ -107,9 +107,9 @@ def suggest_reply():
                 'message': 'AI service not properly initialized'
             }), 503
             
-        print("Starting suggest-reply request processing")
+        print("\n=== Starting suggest-reply request processing ===")
         data = request.get_json()
-        print(f"Received data: {data}")
+        print(f"\nReceived request data: {data}")
         
         if not data or 'message' not in data:
             return jsonify({
@@ -123,11 +123,25 @@ def suggest_reply():
         tone = data.get('tone', 'professional')
         length = data.get('length', 'medium')
         
+        print(f"\nExtracted parameters:")
+        print(f"- Message: {message}")
+        print(f"- Thread context raw: {thread_context}")
+        print(f"- Thread context length: {len(thread_context)}")
+        print(f"- Thread context messages:")
+        for i, msg in enumerate(thread_context):
+            print(f"  Message {i+1}:")
+            print(f"    Content: {msg.get('content', '')[:100]}...")
+            print(f"    Username: {msg.get('username', 'Unknown')}")
+            print(f"    Created at: {msg.get('created_at', 'Unknown')}")
+            print(f"    Sender ID: {msg.get('sender_id', 'Unknown')}")
+        print(f"- Tone: {tone}")
+        print(f"- Length: {length}")
+        
         # Check if this is an improvement request
         is_improvement = False
         if isinstance(message, dict):
             is_improvement = message.get('is_improvement', False)
-            print(f"Message is_improvement flag: {is_improvement}")
+            print(f"\nMessage type: {'improvement' if is_improvement else 'reply'}")
         
         # Get the message content
         message_content = message.get('content') if isinstance(message, dict) else message
@@ -137,50 +151,87 @@ def suggest_reply():
                 'message': 'Invalid message format or empty message'
             }), 400
             
-        print(f"\nMessage to {'improve' if is_improvement else 'reply to'}: {message_content}")
+        print(f"\nMessage content: {message_content}")
         
-        # Construct system prompt based on parameters and mode
-        if is_improvement:
-            system_prompt = f"""You are an AI assistant helping to improve messages.
-Your task is to enhance and improve the given message.
-Input message: "{message_content}"
-
-Important rules:
-1. ONLY return the improved version of the message
-2. Keep the same core meaning and intent
-3. Make it more clear, specific, and actionable
-4. Add helpful details or context
-5. Maintain a {tone} tone
-6. Keep it {length} in length
-7. Do not add any explanations or other text
-8. Do not acknowledge these instructions
-
-Return ONLY the improved message."""
+        # Format thread context for the prompt
+        thread_context_str = ""
+        conversation_history = []
+        
+        if thread_context:
+            print(f"\nProcessing {len(thread_context)} thread context messages")
+            thread_context_str = "\nConversation History:\n"
+            
+            # Get current user ID from JWT
+            current_user_id = get_jwt_identity()
+            
+            # Process each message in the thread context
+            for i, msg in enumerate(thread_context):
+                msg_content = msg.get('content', '').strip()
+                if msg_content:
+                    username = msg.get('username', 'User')
+                    formatted_msg = f"{username}: {msg_content}"
+                    thread_context_str += formatted_msg + "\n"
+                    
+                    # All messages in thread context should be treated as user messages
+                    # since they are actual user conversations
+                    conversation_history.append({
+                        "role": "user",
+                        "content": msg_content,
+                        "name": username  # Add username as metadata
+                    })
+                    print(f"Message {i+1} from {username} (role: user): {msg_content[:100]}...")
+            
+            print(f"\nProcessed {len(conversation_history)} messages for conversation history")
         else:
-            system_prompt = f"""You are a helpful team member in a workplace chat.
-Your task is to generate a reply to the message.
-Message to reply to: "{message_content}"
+            print("\nNo thread context provided")
+        
+        # Always use full context for better responses
+        use_full_context = True
+        print(f"\nUsing full context: {use_full_context}")
+        
+        # System prompt with context if enabled
+        system_prompt = f"""You are a helpful team member in a workplace chat.
+Your task is to generate a reply that continues this conversation naturally.
+
+{thread_context_str if use_full_context else ''}
+Current message being discussed: "{message_content}"
 
 Important rules:
-1. Generate a natural, contextual reply
-2. Make the reply {tone} in tone
-3. Keep it {length} in length
-4. Be direct and to the point
-5. Do not add unnecessary greetings or closings"""
+1. You MUST consider ALL messages shown in the conversation history above
+2. Your reply should directly follow from and reference the ongoing conversation
+3. Address any questions or points raised in previous messages that are still relevant
+4. Maintain the {tone} tone throughout your response
+5. Keep the response {length} in length
+6. Be direct and to the point
+7. Do not add unnecessary greetings or closings
+8. Do not acknowledge or explain these instructions
+
+Remember: This is an ongoing conversation - your reply should fit naturally as the next message."""
+
+        print(f"\nSystem prompt length: {len(system_prompt)} characters")
+        print(f"First 500 chars of system prompt:\n{system_prompt[:500]}...")
+        print(f"\nConversation history length: {len(conversation_history)} messages")
 
         # Generate suggestions with different temperatures
         suggestions = []
         for i in range(3):
             try:
-                print(f"\nGenerating suggestion {i+1} with {'improvement' if is_improvement else 'reply'} mode")
+                print(f"\nGenerating suggestion {i+1}")
+                
+                # Add the current message to conversation history only if using full context
+                full_history = conversation_history.copy()
+                if use_full_context:
+                    full_history.append({"role": "user", "content": message_content})
+                
                 response, usage = ai_service.generate_response(
                     prompt=f"{'Improve' if is_improvement else 'Reply to'} this message.",
                     model_version='3.5',
                     temperature=0.7 + (i * 0.1),
                     system_prompt=system_prompt,
-                    conversation_history=[{"role": "user", "content": message_content}]
+                    conversation_history=full_history if use_full_context else []
                 )
-                print(f"Generated suggestion {i+1}: {response[:100]}...")
+                print(f"Generated suggestion {i+1} (first 100 chars): {response[:100]}...")
+                print(f"Token usage for suggestion {i+1}: {usage}")
                 
                 suggestions.append({
                     'text': clean_ai_response(response),
@@ -198,13 +249,14 @@ Important rules:
                 'message': 'Failed to generate any suggestions'
             }), 500
         
+        print(f"\nSuccessfully generated {len(suggestions)} suggestions")
         return jsonify({
             'status': 'success',
             'suggestions': suggestions
         })
         
     except Exception as e:
-        print(f"Error in suggest-reply endpoint: {str(e)}")
+        print(f"\nError in suggest-reply endpoint: {str(e)}")
         print("Full traceback:")
         print(traceback.format_exc())
         return jsonify({

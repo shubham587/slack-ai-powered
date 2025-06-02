@@ -52,24 +52,85 @@ const AutoReplyComposer = ({
       setError(null);
 
       // Debug logs
-      console.log('Original message object:', message);
-      console.log('Is improvement flag:', message.is_improvement);
+      console.log('AutoReplyComposer - Starting suggestion generation:', {
+        message,
+        threadContext,
+        selectedTone,
+        selectedLength
+      });
+
+      // Ensure thread context is properly formatted and sorted
+      const processedContext = threadContext
+        .map(msg => ({
+          content: msg.content || '',
+          username: msg.username || 'User',
+          created_at: msg.created_at || new Date().toISOString(),
+          id: msg._id || msg.id,
+          sender_id: msg.sender_id // Ensure we pass sender_id for role determination
+        }))
+        .filter(msg => msg.content && msg.content.trim() !== '')
+        .sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+
+      // Log detailed context information
+      console.log('AutoReplyComposer - Thread Context Analysis:', {
+        originalContext: threadContext.map(msg => ({
+          id: msg._id || msg.id,
+          content: msg.content,
+          username: msg.username,
+          created_at: msg.created_at,
+          sender_id: msg.sender_id
+        })),
+        processedContext: processedContext.map(msg => ({
+          id: msg.id,
+          content: msg.content,
+          username: msg.username,
+          created_at: msg.created_at,
+          sender_id: msg.sender_id
+        })),
+        contextStats: {
+          originalLength: threadContext.length,
+          processedLength: processedContext.length,
+          messagesWithContent: processedContext.length,
+          timeRange: processedContext.length > 0 ? {
+            first: new Date(processedContext[0].created_at).toISOString(),
+            last: new Date(processedContext[processedContext.length - 1].created_at).toISOString()
+          } : null
+        },
+        targetMessage: {
+          content: typeof message === 'string' ? message : message.content,
+          useFullContext: typeof message === 'string' ? true : message.useFullContext,
+          is_improvement: typeof message === 'string' ? false : message.is_improvement
+        }
+      });
 
       // Create a more detailed context object
       const requestBody = {
         message: typeof message === 'string' ? 
-          { content: message, is_improvement: message.is_improvement || false } : 
+          { content: message, is_improvement: false, useFullContext: true } : 
           { 
             ...message,
             content: message.content,
-            is_improvement: message.is_improvement || false // Use the passed flag instead of forcing true
+            is_improvement: message.is_improvement || false,
+            useFullContext: true // Always use full context for better responses
           },
-        threadContext: [],
+        thread_context: processedContext, // Changed from threadContext to thread_context to match backend expectation
         tone: selectedTone,
-        length: selectedLength
+        length: selectedLength,
+        useFullContext: true // Always use full context for better responses
       };
 
-      console.log('Sending request to AI:', JSON.stringify(requestBody, null, 2)); // Detailed debug log
+      console.log('AutoReplyComposer - Final Request Body:', {
+        messageDetails: requestBody.message,
+        threadContextLength: requestBody.thread_context.length,
+        threadContextMessages: requestBody.thread_context.map(msg => ({
+          content: msg.content,
+          username: msg.username,
+          created_at: msg.created_at,
+          sender_id: msg.sender_id
+        })),
+        useFullContext: requestBody.useFullContext,
+        serializedBody: JSON.stringify(requestBody) // Log the actual serialized body
+      });
 
       const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5001'}/api/ai/suggest-reply`, {
         method: 'POST',
@@ -77,17 +138,24 @@ const AutoReplyComposer = ({
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${localStorage.getItem('token')}`
         },
-        body: JSON.stringify(requestBody)
+        body: JSON.stringify({
+          ...requestBody,
+          thread_context: requestBody.thread_context // Ensure thread_context is explicitly included
+        })
       });
 
       if (!response.ok) {
         const errorData = await response.json();
-        console.error('API Error:', errorData);
+        console.error('AutoReplyComposer - API Error:', errorData);
         throw new Error(errorData.message || 'Failed to generate suggestions');
       }
 
       const data = await response.json();
-      console.log('API Response:', data); // Debug log
+      console.log('AutoReplyComposer - API Response:', {
+        status: data.status,
+        suggestionsCount: data.suggestions?.length,
+        firstSuggestion: data.suggestions?.[0]?.text?.substring(0, 100) + '...'
+      });
       
       if (data.status === 'success' && data.suggestions) {
         setSuggestions(data.suggestions);
@@ -95,7 +163,7 @@ const AutoReplyComposer = ({
         throw new Error(data.message || 'Failed to generate suggestions');
       }
     } catch (error) {
-      console.error('Error generating suggestions:', error);
+      console.error('AutoReplyComposer - Error:', error);
       setError('Failed to generate suggestions. Please try again.');
     } finally {
       setIsLoading(false);

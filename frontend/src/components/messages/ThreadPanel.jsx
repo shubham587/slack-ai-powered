@@ -13,6 +13,7 @@ import {
   MenuItem,
   MenuDivider,
   useToast,
+  Button,
 } from '@chakra-ui/react';
 import { CloseIcon, EditIcon, DeleteIcon, ChatIcon } from '@chakra-ui/icons';
 import { BsThreeDotsVertical } from 'react-icons/bs';
@@ -74,7 +75,12 @@ const ThreadPanel = ({
   // Effect to handle suggested reply
   useEffect(() => {
     if (selectedMessage) {
-      handleSendReply({ content: selectedMessage.content });
+      console.log('ThreadPanel - Selected message for reply:', selectedMessage);
+      // Ensure we preserve useFullContext flag
+      setInternalSelectedMessage({
+        ...selectedMessage,
+        useFullContext: selectedMessage.useFullContext === undefined ? true : selectedMessage.useFullContext
+      });
     }
   }, [selectedMessage]);
 
@@ -83,8 +89,11 @@ const ThreadPanel = ({
     if (!parentMessage) return;
 
     const messageId = parentMessage._id || parentMessage.id;
-    console.log('Parent message:', parentMessage);
-    console.log('Message ID for thread:', messageId);
+    console.log('ThreadPanel - Loading replies for:', {
+      parentMessage,
+      messageId,
+      currentChannel
+    });
     
     // Track if component is mounted
     let isMounted = true;
@@ -107,7 +116,7 @@ const ThreadPanel = ({
         }
 
         const data = await response.json();
-        console.log('Received replies from server:', data);
+        console.log('ThreadPanel - Received replies:', data);
 
         // Only update state if component is still mounted
         if (isMounted) {
@@ -116,7 +125,7 @@ const ThreadPanel = ({
             new Date(a.created_at) - new Date(b.created_at)
           );
 
-          console.log('Setting sorted replies:', sortedReplies);
+          console.log('ThreadPanel - Setting sorted replies:', sortedReplies);
           setReplies(sortedReplies);
 
           // Update parent message reply count to match actual number of replies
@@ -631,6 +640,42 @@ const ThreadPanel = ({
         bg="gray.800"
         position="relative"
       >
+        {/* Quick Reply Button */}
+        <Flex justify="center" mb={4}>
+          <Button
+            leftIcon={<AiOutlineRobot />}
+            onClick={() => {
+              // Create message object with thread context
+              const messageWithContext = {
+                ...parentMessage, // Use parent message as the target
+                is_improvement: false,
+                useFullContext: true
+              };
+              
+              console.log('ThreadPanel - AI Reply Button Clicked:', {
+                messageWithContext,
+                parentMessage,
+                replies,
+                fullContext: [parentMessage, ...replies].map(msg => ({
+                  id: msg._id || msg.id,
+                  content: msg.content,
+                  username: msg.username,
+                  created_at: msg.created_at
+                }))
+              });
+              
+              setInternalSelectedMessage(messageWithContext);
+              setInternalShowAIComposer(true);
+            }}
+            variant="outline"
+            colorScheme="blue"
+            size="sm"
+            width="auto"
+          >
+            Get AI Reply Suggestion
+          </Button>
+        </Flex>
+
         <MessageInput
           onSendMessage={handleSendReply}
           currentChannel={currentChannel}
@@ -666,14 +711,37 @@ const ThreadPanel = ({
       {(showAIComposer || internalShowAIComposer) && (selectedMessage || internalSelectedMessage) && (
         <AutoReplyComposer
           message={selectedMessage || internalSelectedMessage}
-          threadContext={[
-            parentMessage,
-            ...(selectedMessage?.useFullContext || internalSelectedMessage?.useFullContext
-              ? replies  // Include all replies for contextual suggestions
-              : replies.filter(reply => 
-                  new Date(reply.created_at) < new Date((selectedMessage || internalSelectedMessage).created_at)
-                ))
-          ].filter(Boolean)}
+          threadContext={(() => {
+            // Get all messages in chronological order, including the parent message
+            const allMessages = [parentMessage, ...replies].sort(
+              (a, b) => new Date(a.created_at) - new Date(b.created_at)
+            ).map(msg => ({
+              content: msg.content,
+              username: msg.username,
+              created_at: msg.created_at,
+              sender_id: msg.sender_id,
+              id: msg._id || msg.id,
+              channel_id: msg.channel_id,
+              is_direct: msg.is_direct
+            }));
+            
+            // Log the full context details
+            console.log('ThreadPanel - Full Context Details:', {
+              contextLength: allMessages.length,
+              fullContextList: allMessages,
+              parentMessage: {
+                id: parentMessage._id || parentMessage.id,
+                content: parentMessage.content,
+                username: parentMessage.username,
+                created_at: parentMessage.created_at,
+                sender_id: parentMessage.sender_id
+              },
+              repliesCount: replies.length,
+              targetMessage: selectedMessage || internalSelectedMessage
+            });
+            
+            return allMessages;
+          })()}
           onSelectReply={handleSelectAIReply}
           onClose={() => {
             if (internalShowAIComposer) {
