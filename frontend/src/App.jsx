@@ -3,11 +3,11 @@ import { BrowserRouter as Router } from 'react-router-dom';
 import { Provider } from 'react-redux';
 import { ChakraProvider, extendTheme, Box } from '@chakra-ui/react';
 import { store } from './store';
-import AppRoutes from './routes';
 import Toast from './components/common/Toast';
 import PendingInvitations from './components/invitations/PendingInvitations';
 import { useSelector } from 'react-redux';
 import { selectUser } from './store/slices/authSlice';
+import MainRoutes from './routes/MainRoutes';
 
 // Extend Chakra UI theme
 const theme = extendTheme({
@@ -66,7 +66,7 @@ const AuthenticatedContent = () => {
         </Box>
       )}
       <Box h="100%" w="100%" overflow="hidden">
-        <AppRoutes />
+        <MainRoutes />
         <Toast />
       </Box>
     </Box>

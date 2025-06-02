@@ -45,6 +45,8 @@ import { pinMessage, unpinMessage } from '../store/slices/channelsSlice';
 import { selectUser } from '../store/slices/userSlice';
 import { FiDownload } from 'react-icons/fi';
 import { formatFileSize } from '../utils/formatFileSize';
+import AutoReplyComposer from '../components/messages/AutoReplyComposer';
+import ThreadPanel from '../components/messages/ThreadPanel';
 
 const handleSendMessage = async (messageData, hasFile) => {
   if ((!messageData.content?.trim() && !hasFile) || !currentChannel?.id) {
@@ -329,6 +331,26 @@ const handleDeleteMessage = async (messageId) => {
   }
 };
 
+const handleThreadOpen = (message) => {
+  // Ensure the message has the current channel ID and type
+  const messageWithChannel = {
+    ...message,
+    channel_id: currentChannel.id,
+    is_direct: currentChannel.is_direct || false
+  };
+  setActiveThread(messageWithChannel);
+  setShowThreadPanel(true);
+};
+
+const handleSuggestReply = (message) => {
+  handleThreadOpen(message);
+  // Wait a bit for the thread to open before showing AI composer
+  setTimeout(() => {
+    setSelectedMessage(message);
+    setShowAIComposer(true);
+  }, 100);
+};
+
 const Chat = () => {
   const dispatch = useDispatch();
   const user = useSelector(selectUser);
@@ -343,6 +365,28 @@ const Chat = () => {
   const [showPinnedFiles, setShowPinnedFiles] = useState(false);
   const [pinnedMessages, setPinnedMessages] = useState([]);
   const [editingMessage, setEditingMessage] = useState(null);
+  const [replyingTo, setReplyingTo] = useState(null);
+  const [selectedMessage, setSelectedMessage] = useState(null);
+  const [showThreadPanel, setShowThreadPanel] = useState(false);
+  const [activeThread, setActiveThread] = useState(null);
+  const [showAIComposer, setShowAIComposer] = useState(false);
+
+  // Debug log current user
+  useEffect(() => {
+    console.log('Current user:', user);
+  }, [user]);
+
+  // Add debug logging for message ownership
+  const isOwnMessage = (message) => {
+    const isOwn = message.sender_id === user?.id || message.sender_id === user?._id;
+    console.log('Message ownership check:', {
+      messageSenderId: message.sender_id,
+      userId: user?.id,
+      userIdAlt: user?._id,
+      isOwn
+    });
+    return isOwn;
+  };
 
   // Add effect to load pinned messages when channel changes
   useEffect(() => {
@@ -446,11 +490,12 @@ const Chat = () => {
         {/* Messages Area */}
         <Box flex="1" overflowY="auto" px={6} py={4}>
           {Array.isArray(messages) && messages.map((message) => {
+            const isOwn = isOwnMessage(message);
             console.log('Rendering message:', {
               messageId: message.id,
               username: message.username,
               isPinned: currentChannel?.pinned_messages?.includes(message.id),
-              isOwner: message.sender_id === user?.id,
+              isOwn,
               currentChannel: currentChannel?.id,
               pinnedMessages: currentChannel?.pinned_messages
             });
@@ -510,19 +555,39 @@ const Chat = () => {
                               }
                             }}
                             bg="gray.800"
-                            _hover={{ bg: 'gray.700' }}
+                            _hover={{ bg: "gray.700" }}
                             color="white"
                           >
                             {currentChannel?.pinned_messages?.includes(message.id) ? 'Unpin Message' : 'Pin Message'}
                           </MenuItem>
-                          {message.sender_id === user?.id && (
+                          <MenuItem
+                            icon={<ChatIcon />}
+                            onClick={() => handleThreadOpen(message)}
+                            bg="gray.800"
+                            _hover={{ bg: "gray.700" }}
+                            color="white"
+                          >
+                            Reply in Thread
+                          </MenuItem>
+                          {!isOwn && (
+                            <MenuItem
+                              icon={<AiOutlineRobot />}
+                              onClick={() => handleSuggestReply(message)}
+                              bg="gray.800"
+                              _hover={{ bg: "gray.700" }}
+                              color="white"
+                            >
+                              Suggest Reply
+                            </MenuItem>
+                          )}
+                          {isOwn && (
                             <>
                               <MenuDivider borderColor="gray.700" />
                               <MenuItem
                                 icon={<EditIcon />}
                                 onClick={() => setEditingMessage(message)}
                                 bg="gray.800"
-                                _hover={{ bg: 'gray.700' }}
+                                _hover={{ bg: "gray.700" }}
                                 color="white"
                               >
                                 Edit Message
@@ -531,7 +596,7 @@ const Chat = () => {
                                 icon={<DeleteIcon />}
                                 onClick={() => handleDeleteMessage(message.id)}
                                 bg="gray.800"
-                                _hover={{ bg: 'gray.700' }}
+                                _hover={{ bg: "gray.700" }}
                                 color="red.300"
                               >
                                 Delete Message
@@ -634,6 +699,58 @@ const Chat = () => {
             </ModalBody>
           </ModalContent>
         </Modal>
+
+        {/* Message Input */}
+        <Box 
+          key="message-input-container" 
+          px={6} 
+          py={4} 
+          borderTop="1px" 
+          borderColor="gray.700"
+          maxW="100%"
+        >
+          <MessageInput
+            onSendMessage={handleSendMessage}
+            currentChannel={currentChannel}
+            handleTyping={handleTyping}
+            replyingTo={replyingTo}
+            onCancel={() => setReplyingTo(null)}
+          />
+        </Box>
+
+        {/* Thread Panel */}
+        {showThreadPanel && (
+          <Box 
+            w={{ base: "100%", lg: "400px" }}
+            minW={{ base: "100%", lg: "400px" }}
+            borderLeft="1px" 
+            borderColor="gray.700" 
+            bg="gray.800"
+            position={{ base: "absolute", lg: "relative" }}
+            right={0}
+            top={0}
+            h="100%"
+            zIndex={5}
+          >
+            <ThreadPanel
+              parentMessage={activeThread}
+              onClose={() => {
+                setShowThreadPanel(false);
+                setActiveThread(null);
+                setShowAIComposer(false);
+                setSelectedMessage(null);
+              }}
+              onSendReply={handleNewReply}
+              currentChannel={currentChannel}
+              showAIComposer={showAIComposer}
+              selectedMessage={selectedMessage}
+              onAIComposerClose={() => {
+                setShowAIComposer(false);
+                setSelectedMessage(null);
+              }}
+            />
+          </Box>
+        )}
 
         {/* Existing modals */}
       </Flex>

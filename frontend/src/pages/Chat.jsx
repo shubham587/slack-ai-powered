@@ -57,8 +57,9 @@ import { fetchChannels, setActiveChannel, createChannel } from '../store/slices/
 import { fetchPendingInvitations } from '../store/slices/invitationsSlice';
 import MessageInput from '../components/messages/MessageInput';
 import { BsThreeDotsVertical } from 'react-icons/bs';
-import { AiFillPushpin, AiOutlinePushpin } from 'react-icons/ai';
+import { AiFillPushpin, AiOutlinePushpin, AiOutlineRobot } from 'react-icons/ai';
 import ThreadPanel from '../components/messages/ThreadPanel';
+import AutoReplyComposer from '../components/ai/AutoReplyComposer';
 
 const Chat = () => {
   const dispatch = useDispatch();
@@ -86,6 +87,12 @@ const Chat = () => {
   const [pinnedMessages, setPinnedMessages] = useState([]);
   const [showSidebar, setShowSidebar] = useState(true);
   const [activeThread, setActiveThread] = useState(null);
+  const [showAIComposer, setShowAIComposer] = useState(false);
+  const [selectedMessage, setSelectedMessage] = useState(null);
+  const [messageSearchTerm, setMessageSearchTerm] = useState('');
+  const [filteredMessages, setFilteredMessages] = useState([]);
+  const [userSearchTerm, setUserSearchTerm] = useState('');
+  const [filteredDirectMessages, setFilteredDirectMessages] = useState([]);
 
   const scrollToBottom = () => {
     if (messagesEndRef.current) {
@@ -227,6 +234,32 @@ const Chat = () => {
     }
   }, [currentChannel?.pinned_messages, messages]);
 
+  useEffect(() => {
+    if (messageSearchTerm.trim() === '') {
+      setFilteredMessages(messages);
+    } else {
+      const searchTermLower = messageSearchTerm.toLowerCase();
+      const filtered = messages.filter(message => 
+        message.content?.toLowerCase().includes(searchTermLower) ||
+        message.username?.toLowerCase().includes(searchTermLower)
+      );
+      setFilteredMessages(filtered);
+    }
+  }, [messageSearchTerm, messages]);
+
+  useEffect(() => {
+    if (userSearchTerm.trim() === '') {
+      setFilteredDirectMessages(directMessages);
+    } else {
+      const searchTermLower = userSearchTerm.toLowerCase();
+      const filtered = directMessages.filter(dm => 
+        dm.user.username.toLowerCase().includes(searchTermLower) ||
+        dm.user.display_name?.toLowerCase().includes(searchTermLower)
+      );
+      setFilteredDirectMessages(filtered);
+    }
+  }, [userSearchTerm, directMessages]);
+
   const loadChannels = async () => {
     try {
       setIsLoading(true);
@@ -321,8 +354,8 @@ const Chat = () => {
         formData.append('content', messageData.content || '');
         
         response = await fetch(url, {
-          method: 'POST',
-          headers: {
+        method: 'POST',
+        headers: {
             'Authorization': `Bearer ${token}`
             // Don't set Content-Type for FormData, browser will set it automatically with boundary
           },
@@ -335,11 +368,11 @@ const Chat = () => {
           headers: {
             'Authorization': `Bearer ${token}`,
             'Content-Type': 'application/json'
-          },
+        },
           body: JSON.stringify({
             content: messageData.content
           })
-        });
+      });
       }
       
       if (!response.ok) {
@@ -545,11 +578,11 @@ const Chat = () => {
   const handleChannelSelect = (channel) => {
     console.log('Selecting channel:', channel);
     
-    // Only close thread if it's from a different channel
-    if (activeThread && activeThread.channel_id !== channel.id) {
-      setShowThreadPanel(false);
-      setActiveThread(null);
-    }
+    // Always close thread when switching channels
+    setShowThreadPanel(false);
+    setActiveThread(null);
+    setShowAIComposer(false);
+    setSelectedMessage(null);
     
     setCurrentChannel(channel);
     if (channel?.id) {
@@ -601,6 +634,12 @@ const Chat = () => {
       }
 
       const data = await response.json();
+      
+      // Always close thread when switching to DM
+      setShowThreadPanel(false);
+      setActiveThread(null);
+      setShowAIComposer(false);
+      setSelectedMessage(null);
       
       // Create a virtual channel for direct messages
       const dmChannel = {
@@ -794,6 +833,44 @@ const Chat = () => {
     setShowThreadPanel(true);
   };
 
+  const handleSuggestReply = (message) => {
+    // First ensure thread is open
+    const messageWithChannel = {
+      ...message,
+      channel_id: currentChannel.id,
+      is_direct: currentChannel.is_direct || false,
+      is_improvement: false, // This is a reply, not an improvement
+      useFullContext: false // Don't use thread context
+    };
+    setActiveThread(messageWithChannel);
+    setShowThreadPanel(true);
+
+    // Wait a bit for the thread to open before showing AI composer
+    setTimeout(() => {
+      setSelectedMessage(messageWithChannel);
+      setShowAIComposer(true);
+    }, 100);
+  };
+
+  const handleSuggestReplyWithContext = async (message) => {
+    // First ensure thread is open
+    const messageWithChannel = {
+      ...message,
+      channel_id: currentChannel.id,
+      is_direct: currentChannel.is_direct || false,
+      is_improvement: false, // This is a reply, not an improvement
+      useFullContext: true // Use full thread context
+    };
+    setActiveThread(messageWithChannel);
+    setShowThreadPanel(true);
+
+    // Wait a bit for the thread to open and load replies before showing AI composer
+    setTimeout(() => {
+      setSelectedMessage(messageWithChannel);
+      setShowAIComposer(true);
+    }, 100);
+  };
+
   // Update the handleNewReply function to immediately update the UI
   const handleNewReply = (reply) => {
     const parentId = reply.parent_id;
@@ -828,163 +905,216 @@ const Chat = () => {
     }
   };
 
+  const isOwnMessage = (message) => {
+    const isOwn = message.sender_id === user?.id || message.sender_id === user?._id;
+    console.log('Message ownership check:', {
+      messageSenderId: message.sender_id,
+      userId: user?.id,
+      userIdAlt: user?._id,
+      isOwn
+    });
+    return isOwn;
+  };
+
+  const formatTimestamp = (timestamp) => {
+    // Create a date object from the UTC timestamp
+    const date = new Date(timestamp);
+    
+    // Convert to IST by adding 5 hours and 30 minutes
+    const istDate = new Date(date.getTime() + (5.5 * 60 * 60 * 1000));
+    
+    return istDate.toLocaleTimeString('en-IN', {
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: true
+    });
+  };
+
   // Update the renderMessage function to include a download button for files
-  const renderMessage = (message, isPinned = false) => (
-    <Box
-      key={`message-${message.id}-${isPinned ? 'pinned' : 'regular'}`}
-      py={2}
-      px={4}
-      mx={-4}
-      bg={isPinned ? 'gray.800' : 'transparent'}
-      _hover={{ bg: isPinned ? 'gray.700' : 'gray.800' }}
-      borderRadius="md"
-      role="group"
-      position="relative"
-      borderLeft={currentChannel?.pinned_messages?.includes(message.id) ? '4px solid' : 'none'}
-      borderLeftColor={currentChannel?.pinned_messages?.includes(message.id) ? 'blue.400' : 'transparent'}
-    >
-      <Flex gap={3}>
-        <Avatar
-          size="sm"
-          name={message.username}
-          src={message.avatar_url}
-        />
-        <Box flex="1" minW={0}>
-          <Flex align="center" justify="space-between">
-            <Flex align="center" gap={2}>
-              <Text fontWeight="bold" color="white">
-                {message.username}
-              </Text>
-              <Text fontSize="xs" color="gray.400">
-                {new Date(message.created_at).toLocaleTimeString([], {
-                  hour: '2-digit',
-                  minute: '2-digit',
-                  hour12: false
-                })}
-              </Text>
-              {currentChannel?.pinned_messages?.includes(message.id) && (
-                <Flex align="center" gap={1}>
-                  <Icon as={AiFillPushpin} color="blue.400" boxSize={3} />
-                  <Text fontSize="xs" color="blue.400">Pinned</Text>
-                </Flex>
-              )}
-              {message.reply_count > 0 && (
-                <Text 
-                  fontSize="xs" 
-                  color="blue.300" 
-                  cursor="pointer"
-                  onClick={() => handleThreadOpen(message)}
-                >
-                  {message.reply_count} {message.reply_count === 1 ? 'reply' : 'replies'}
+  const renderMessage = (message, isPinned = false) => {
+    const isOwn = isOwnMessage(message);
+
+  return (
+      <Box
+        key={`message-${message.id}-${isPinned ? 'pinned' : 'regular'}`}
+        py={2}
+        px={4}
+        mx={-4}
+        bg={isPinned ? 'gray.800' : 'transparent'}
+        _hover={{ bg: isPinned ? 'gray.700' : 'gray.800' }}
+        borderRadius="md"
+        role="group"
+        position="relative"
+        borderLeft={currentChannel?.pinned_messages?.includes(message.id) ? '4px solid' : 'none'}
+        borderLeftColor={currentChannel?.pinned_messages?.includes(message.id) ? 'blue.400' : 'transparent'}
+      >
+        <Flex gap={3}>
+          <Avatar
+            size="sm"
+            name={message.username}
+            src={message.avatar_url}
+          />
+          <Box flex="1" minW={0}>
+            <Flex align="center" justify="space-between">
+              <Flex align="center" gap={2}>
+                <Text fontWeight="bold" color="white">
+                  {message.username}
                 </Text>
-              )}
-            </Flex>
-            <Menu>
-              <MenuButton
-                as={IconButton}
-                icon={<BsThreeDotsVertical />}
-                variant="ghost"
-                size="xs"
-                color="gray.400"
-                opacity="0"
-                _groupHover={{ opacity: 1 }}
-                _hover={{ color: 'white', bg: 'whiteAlpha.100' }}
-              />
-              <MenuList bg="gray.800" borderColor="gray.700">
-                <MenuItem
-                  icon={<ChatIcon />}
-                  onClick={() => handleThreadOpen(message)}
-                  bg="gray.800"
-                  _hover={{ bg: 'gray.700' }}
-                  color="white"
-                >
-                  Reply in Thread
-                </MenuItem>
-                <MenuItem
-                  icon={currentChannel?.pinned_messages?.includes(message.id) ? 
-                    <AiFillPushpin /> : <AiOutlinePushpin />
-                  }
-                  onClick={() => {
-                    if (currentChannel?.pinned_messages?.includes(message.id)) {
-                      handleUnpinMessage(message.id);
-                    } else {
-                      handlePinMessage(message.id);
-                    }
-                  }}
-                  bg="gray.800"
-                  _hover={{ bg: 'gray.700' }}
-                  color="white"
-                >
-                  {currentChannel?.pinned_messages?.includes(message.id) ? 'Unpin Message' : 'Pin Message'}
-                </MenuItem>
-                {message.sender_id === user?.id && (
-                  <>
-                    <MenuDivider borderColor="gray.700" />
-                    <MenuItem
-                      icon={<EditIcon />}
-                      onClick={() => setEditingMessage(message)}
-                      bg="gray.800"
-                      _hover={{ bg: 'gray.700' }}
-                      color="white"
-                    >
-                      Edit Message
-                    </MenuItem>
-                    <MenuItem
-                      icon={<DeleteIcon />}
-                      onClick={() => handleDeleteMessage(message.id)}
-                      bg="gray.800"
-                      _hover={{ bg: 'gray.700' }}
-                      color="red.300"
-                    >
-                      Delete Message
-                    </MenuItem>
-                  </>
+                <Text fontSize="xs" color="gray.400">
+                  {formatTimestamp(message.created_at)}
+                </Text>
+                {currentChannel?.pinned_messages?.includes(message.id) && (
+                  <Flex align="center" gap={1}>
+                    <Icon as={AiFillPushpin} color="blue.400" boxSize={3} />
+                    <Text fontSize="xs" color="blue.400">Pinned</Text>
+                  </Flex>
                 )}
-              </MenuList>
-            </Menu>
-          </Flex>
-          {message.file ? (
-            <Box
-              mt={2}
-              p={3}
-              bg="gray.700"
-              borderRadius="md"
-              maxW="300px"
-            >
-              <VStack spacing={2} align="stretch">
-                <Flex align="center" gap={3}>
-                  <Icon as={AttachmentIcon} boxSize={5} color="blue.300" />
-                  <Box flex="1" minW={0}>
-                    <Text fontSize="sm" color="white" isTruncated>
-                      {message.file.filename}
-                    </Text>
-                    <Text fontSize="xs" color="gray.400">
-                      {(message.file.size / 1024).toFixed(1)} KB
-                    </Text>
-                  </Box>
-                </Flex>
-                <Flex justify="flex-end" gap={2}>
-                  <Button
-                    size="sm"
-                    leftIcon={<DownloadIcon />}
-                    onClick={() => downloadFile(message.file.download_url)}
-                    variant="ghost"
-                    colorScheme="blue"
+                {message.reply_count > 0 && (
+                  <Text 
+                    fontSize="xs" 
+                    color="blue.300" 
+                    cursor="pointer"
+                    onClick={() => handleThreadOpen(message)}
                   >
-                    Download
-                  </Button>
-                </Flex>
-              </VStack>
-            </Box>
-          ) : (
-            <Text color="gray.100" whiteSpace="pre-wrap">
-              {message.content}
-            </Text>
-          )}
-        </Box>
-      </Flex>
-    </Box>
-  );
+                    {message.reply_count} {message.reply_count === 1 ? 'reply' : 'replies'}
+                  </Text>
+                )}
+              </Flex>
+              <Menu>
+                <MenuButton
+                  as={IconButton}
+                  icon={<BsThreeDotsVertical />}
+                  variant="ghost"
+                  size="xs"
+                  color="gray.400"
+                  opacity="0"
+                  _groupHover={{ opacity: 1 }}
+                  _hover={{ color: 'white', bg: 'whiteAlpha.100' }}
+                />
+                <MenuList bg="gray.800" borderColor="gray.700">
+                  <MenuItem
+                    icon={<ChatIcon />}
+                    onClick={() => handleThreadOpen(message)}
+                    bg="gray.800"
+                    _hover={{ bg: "gray.700" }}
+                    color="white"
+                  >
+                    Reply in Thread
+                  </MenuItem>
+                  {!isOwn && (
+                    <>
+                      <MenuItem
+                        icon={<AiOutlineRobot />}
+                        onClick={() => handleSuggestReply(message)}
+                        bg="gray.800"
+                        _hover={{ bg: "gray.700" }}
+                        color="white"
+                      >
+                        Quick Reply Suggestion
+                      </MenuItem>
+                      <MenuItem
+                        icon={<AiOutlineRobot />}
+                        onClick={() => handleSuggestReplyWithContext(message)}
+                        bg="gray.800"
+                        _hover={{ bg: "gray.700" }}
+                        color="white"
+                      >
+                        Contextual Reply Suggestion
+                      </MenuItem>
+                    </>
+                  )}
+                  <MenuItem
+                    icon={currentChannel?.pinned_messages?.includes(message.id) ? 
+                      <AiFillPushpin /> : <AiOutlinePushpin />
+                    }
+                    onClick={() => {
+                      if (currentChannel?.pinned_messages?.includes(message.id)) {
+                        handleUnpinMessage(message.id);
+                      } else {
+                        handlePinMessage(message.id);
+                      }
+                    }}
+                    bg="gray.800"
+                    _hover={{ bg: 'gray.700' }}
+                    color="white"
+                  >
+                    {currentChannel?.pinned_messages?.includes(message.id) ? 'Unpin Message' : 'Pin Message'}
+                  </MenuItem>
+                  {message.sender_id === user?.id && (
+                    <>
+                      <MenuDivider borderColor="gray.700" />
+                      <MenuItem
+                        icon={<EditIcon />}
+                        onClick={() => setEditingMessage(message)}
+                        bg="gray.800"
+                        _hover={{ bg: 'gray.700' }}
+                        color="white"
+                      >
+                        Edit Message
+                      </MenuItem>
+                      <MenuItem
+                        icon={<DeleteIcon />}
+                        onClick={() => handleDeleteMessage(message.id)}
+                        bg="gray.800"
+                        _hover={{ bg: 'gray.700' }}
+                        color="red.300"
+                      >
+                        Delete Message
+                      </MenuItem>
+                    </>
+                  )}
+                </MenuList>
+              </Menu>
+            </Flex>
+            {message.file ? (
+              <Box
+                mt={2}
+                p={3}
+                bg="gray.700"
+                borderRadius="md"
+                maxW="300px"
+              >
+                <VStack spacing={2} align="stretch">
+                  <Flex align="center" gap={3}>
+                    <Icon as={AttachmentIcon} boxSize={5} color="blue.300" />
+                    <Box flex="1" minW={0}>
+                      <Text fontSize="sm" color="white" isTruncated>
+                        {message.file.filename}
+                      </Text>
+                      <Text fontSize="xs" color="gray.400">
+                        {(message.file.size / 1024).toFixed(1)} KB
+                      </Text>
+                    </Box>
+                  </Flex>
+                  <Flex justify="flex-end" gap={2}>
+                    <Button
+                      size="sm"
+                      leftIcon={<DownloadIcon />}
+                      onClick={() => downloadFile(message.file.download_url)}
+                      variant="ghost"
+                      colorScheme="blue"
+                    >
+                      Download
+                    </Button>
+                  </Flex>
+                </VStack>
+              </Box>
+            ) : (
+              <Text color="gray.100" whiteSpace="pre-wrap">
+                {message.content}
+              </Text>
+            )}
+          </Box>
+        </Flex>
+      </Box>
+    );
+  };
+
+  const handleSelectAIReply = (replyText) => {
+    handleSendMessage({ content: replyText });
+    setShowAIComposer(false);
+    setSelectedMessage(null);
+  };
 
   return (
     <Grid 
@@ -1124,8 +1254,29 @@ const Chat = () => {
                 aria-label="Add Direct Message"
               />
             </Flex>
+
+            {/* Add user search box */}
+            <Box mb={4}>
+              <InputGroup size="sm">
+                <InputLeftElement pointerEvents="none">
+                  <SearchIcon color="gray.400" />
+                </InputLeftElement>
+                <Input
+                  value={userSearchTerm}
+                  onChange={(e) => setUserSearchTerm(e.target.value)}
+                  placeholder="Search users..."
+                  bg="gray.700"
+                  border="1px"
+                  borderColor="gray.600"
+                  _placeholder={{ color: 'gray.400' }}
+                  _hover={{ borderColor: 'gray.500' }}
+                  _focus={{ borderColor: 'blue.500', boxShadow: 'none' }}
+                />
+              </InputGroup>
+            </Box>
+
             <Box>
-              {directMessages.map((dm) => (
+              {filteredDirectMessages.map((dm) => (
                 <Button
                   key={dm.user.id}
                   onClick={() => handleDirectMessageSelect(dm.user)}
@@ -1190,21 +1341,42 @@ const Chat = () => {
             bg="gray.800"
             w="100%"
           >
-            <Flex align="center" gap={4}>
+            <Flex align="center" gap={4} flex={1}>
               <Box>
                 <Flex align="center" gap={2}>
-                  <Text key="channel-hash" color="gray.400" fontSize="lg">#</Text>
-                  <Text key="channel-name" color="white" fontWeight="medium" fontSize="lg">
+                  <Text color="gray.400" fontSize="lg">#</Text>
+                  <Text color="white" fontWeight="medium" fontSize="lg">
                     {currentChannel.name}
                   </Text>
                 </Flex>
                 {currentChannel.description && (
-                  <Text key="channel-description" color="gray.400" fontSize="sm">
+                  <Text color="gray.400" fontSize="sm">
                     {currentChannel.description}
                   </Text>
                 )}
               </Box>
+              
+              {/* Add search box */}
+              <Box flex={1} maxW="400px" ml={4}>
+                <InputGroup size="sm">
+                  <InputLeftElement pointerEvents="none">
+                    <SearchIcon color="gray.400" />
+                  </InputLeftElement>
+                  <Input
+                    value={messageSearchTerm}
+                    onChange={(e) => setMessageSearchTerm(e.target.value)}
+                    placeholder="Search messages..."
+                    bg="gray.700"
+                    border="1px"
+                    borderColor="gray.600"
+                    _placeholder={{ color: 'gray.400' }}
+                    _hover={{ borderColor: 'gray.500' }}
+                    _focus={{ borderColor: 'blue.500', boxShadow: 'none' }}
+                  />
+                </InputGroup>
+              </Box>
             </Flex>
+
             <HStack spacing={2}>
               <Tooltip key="thread-tooltip" label="Thread View">
                 <IconButton
@@ -1268,33 +1440,29 @@ const Chat = () => {
                     </Flex>
                     <VStack spacing={2} align="stretch">
                       {pinnedMessages.map(message => (
-                        <Box
+                  <Box
                           key={`pinned-${message.id}`}
                           p={2}
-                          borderRadius="md"
+                    borderRadius="md"
                           bg="gray.700"
                           borderLeft="4px solid"
                           borderLeftColor="blue.400"
-                        >
+                  >
                           <Flex gap={3}>
-                            <Avatar
-                              size="sm"
-                              name={message.username}
-                              src={message.avatar_url}
-                            />
+                      <Avatar
+                        size="sm"
+                        name={message.username}
+                        src={message.avatar_url}
+                      />
                             <Box flex="1" minW={0}>
                               <Flex align="center" gap={2}>
                                 <Text fontWeight="bold" color="white">
-                                  {message.username}
-                                </Text>
+                            {message.username}
+                          </Text>
                                 <Text fontSize="xs" color="gray.400">
-                                  {new Date(message.created_at).toLocaleTimeString([], {
-                                    hour: '2-digit',
-                                    minute: '2-digit',
-                                    hour12: false
-                                  })}
-                                </Text>
-                              </Flex>
+                                  {formatTimestamp(message.created_at)}
+                          </Text>
+                        </Flex>
                               {message.file ? (
                                 <Box
                                   mt={2}
@@ -1316,7 +1484,7 @@ const Chat = () => {
                                       </Box>
                                     </Flex>
                                     <Button
-                                      size="sm"
+                              size="sm"
                                       leftIcon={<DownloadIcon />}
                                       onClick={() => downloadFile(message.file.download_url)}
                                       variant="ghost"
@@ -1326,22 +1494,22 @@ const Chat = () => {
                                     </Button>
                                   </VStack>
                                 </Box>
-                              ) : (
+                        ) : (
                                 <Text color="gray.100" whiteSpace="pre-wrap">
-                                  {message.content}
-                                </Text>
-                              )}
-                            </Box>
-                          </Flex>
-                        </Box>
-                      ))}
+                            {message.content}
+                          </Text>
+                        )}
+                      </Box>
+                    </Flex>
+                  </Box>
+                ))}
                     </VStack>
                   </Box>
                 )}
                 
                 <Box flex="1" />
                 {/* Regular Messages */}
-                {Array.isArray(messages) && messages.map(message => renderMessage(message, false))}
+                {Array.isArray(filteredMessages) && filteredMessages.map(message => renderMessage(message, false))}
                 <div ref={messagesEndRef} />
               </Box>
             </Box>
@@ -1382,9 +1550,17 @@ const Chat = () => {
                 onClose={() => {
                   setShowThreadPanel(false);
                   setActiveThread(null);
+                  setShowAIComposer(false);
+                  setSelectedMessage(null);
                 }}
                 onSendReply={handleNewReply}
                 currentChannel={currentChannel}
+                showAIComposer={showAIComposer}
+                selectedMessage={selectedMessage}
+                onAIComposerClose={() => {
+                  setShowAIComposer(false);
+                  setSelectedMessage(null);
+                }}
               />
             </Box>
           )}

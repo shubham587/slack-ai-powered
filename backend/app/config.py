@@ -1,5 +1,6 @@
 import os
 from dotenv import load_dotenv
+from datetime import timedelta
 
 # Load environment variables
 load_dotenv()
@@ -20,4 +21,13 @@ ALLOWED_EXTENSIONS = {
     'code': {'py', 'js', 'jsx', 'ts', 'tsx', 'json', 'html', 'css'},
     'archive': {'zip', 'rar', '7z', 'tar', 'gz'}
 }
-MAX_CONTENT_LENGTH = 16 * 1024 * 1024  # 16MB max file size 
+MAX_CONTENT_LENGTH = 16 * 1024 * 1024  # 16MB max file size
+
+class Config:
+    # Existing configurations...
+    
+    # AI Rate Limiting
+    AI_REQUESTS_PER_MINUTE = 10  # Adjust based on your needs
+    
+    # Response Caching
+    AI_CACHE_TIMEOUT = 300  # 5 minutes 

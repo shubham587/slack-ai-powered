@@ -11,11 +11,14 @@ import {
   MenuButton,
   MenuList,
   MenuItem,
+  MenuDivider,
   useToast,
 } from '@chakra-ui/react';
-import { CloseIcon, EditIcon, DeleteIcon } from '@chakra-ui/icons';
+import { CloseIcon, EditIcon, DeleteIcon, ChatIcon } from '@chakra-ui/icons';
 import { BsThreeDotsVertical } from 'react-icons/bs';
+import { AiOutlineRobot } from 'react-icons/ai';
 import MessageInput from './MessageInput';
+import AutoReplyComposer from '../ai/AutoReplyComposer';
 import { getSocket } from '../../socket';
 import { useSelector } from 'react-redux';
 import { selectUser } from '../../store/slices/authSlice';
@@ -25,11 +28,34 @@ const ThreadPanel = ({
   onClose, 
   onSendReply,
   currentChannel,
+  showAIComposer = false,
+  selectedMessage = null,
+  onAIComposerClose
 }) => {
   const [replies, setReplies] = useState([]);
   const [editingMessage, setEditingMessage] = useState(null);
+  const [internalSelectedMessage, setInternalSelectedMessage] = useState(null);
+  const [internalShowAIComposer, setInternalShowAIComposer] = useState(false);
+  const [replyingTo, setReplyingTo] = useState(null);
   const toast = useToast();
   const currentUser = useSelector(selectUser);
+
+  // Debug log current user
+  useEffect(() => {
+    console.log('Thread Panel - Current user:', currentUser);
+  }, [currentUser]);
+
+  // Add debug logging for message ownership
+  const isOwnMessage = (message) => {
+    const isOwn = message.sender_id === currentUser?.id || message.sender_id === currentUser?._id;
+    console.log('Thread Panel - Message ownership check:', {
+      messageSenderId: message.sender_id,
+      userId: currentUser?.id,
+      userIdAlt: currentUser?._id,
+      isOwn
+    });
+    return isOwn;
+  };
 
   // Effect to handle channel changes
   useEffect(() => {
@@ -44,6 +70,13 @@ const ThreadPanel = ({
       onClose();
     }
   }, [currentChannel?._id, parentMessage, onClose]);
+
+  // Effect to handle suggested reply
+  useEffect(() => {
+    if (selectedMessage) {
+      handleSendReply({ content: selectedMessage.content });
+    }
+  }, [selectedMessage]);
 
   // Separate effect for loading replies and socket handling
   useEffect(() => {
@@ -227,6 +260,9 @@ const ThreadPanel = ({
       const newReply = await response.json();
       console.log('New reply from server:', newReply);
 
+      // Clear replyingTo state after successful reply
+      setReplyingTo(null);
+      
       // Let the socket event handle adding the reply to the state
       // This ensures consistent handling of new replies
       
@@ -338,6 +374,74 @@ const ThreadPanel = ({
     }
   };
 
+  const handleSelectAIReply = async (replyText) => {
+    try {
+      console.log('Sending AI reply in thread:', replyText);
+      await handleSendReply({ content: replyText });
+      
+      // Clear replyingTo state after successful AI reply
+      setReplyingTo(null);
+      
+      // Close the AI composer
+      if (internalShowAIComposer) {
+        setInternalShowAIComposer(false);
+        setInternalSelectedMessage(null);
+      } else {
+        onAIComposerClose();
+      }
+      
+      toast({
+        title: 'Reply sent in thread',
+        status: 'success',
+        duration: 2000,
+        isClosable: true,
+      });
+    } catch (error) {
+      console.error('Error sending AI reply:', error);
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to send reply',
+        status: 'error',
+        duration: 3000,
+        isClosable: true,
+      });
+    }
+  };
+
+  const handleSuggestReply = (message) => {
+    // When in thread, directly show AI composer for a quick reply
+    setInternalSelectedMessage({
+      ...message,
+      is_improvement: false, // This is a reply, not an improvement
+      useFullContext: false // Don't use thread context
+    });
+    setInternalShowAIComposer(true);
+  };
+
+  const handleSuggestReplyWithContext = (message) => {
+    // When in thread, show AI composer with full context
+    setInternalSelectedMessage({
+      ...message,
+      is_improvement: false, // This is a reply, not an improvement
+      useFullContext: true // Use full thread context
+    });
+    setInternalShowAIComposer(true);
+  };
+
+  const formatTimestamp = (timestamp) => {
+    // Create a date object from the UTC timestamp
+    const date = new Date(timestamp);
+    
+    // Convert to IST by adding 5 hours and 30 minutes
+    const istDate = new Date(date.getTime() + (5.5 * 60 * 60 * 1000));
+    
+    return istDate.toLocaleTimeString('en-IN', {
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: true
+    });
+  };
+
   const renderMessage = (message, isParent = false) => {
     // Ensure we have a valid ID by checking both _id and id fields
     const messageId = message._id || message.id;
@@ -347,8 +451,16 @@ const ThreadPanel = ({
     }
 
     const isEditing = editingMessage && (editingMessage._id === messageId || editingMessage.id === messageId);
-    const isOwnMessage = message.sender_id === currentUser?.id || message.sender_id === currentUser?._id;
+    const isOwn = isOwnMessage(message);
     
+    console.log('Thread Panel - Rendering message:', {
+      messageId,
+      username: message.username,
+      isParent,
+      isOwn,
+      isEditing
+    });
+
     return (
       <Box
         key={`${isParent ? 'parent' : 'reply'}-${messageId}`}
@@ -373,48 +485,76 @@ const ThreadPanel = ({
                   {message.username}
                 </Text>
                 <Text fontSize="xs" color="gray.400">
-                  {new Date(message.created_at).toLocaleTimeString()}
+                  {formatTimestamp(message.created_at)}
                 </Text>
               </Flex>
               
               {/* Context Menu */}
-              {isOwnMessage && !isParent && (
-                <Box opacity="0" _groupHover={{ opacity: 1 }} transition="opacity 0.2s">
-                  <Menu>
-                    <MenuButton
-                      as={IconButton}
-                      icon={<BsThreeDotsVertical />}
-                      variant="ghost"
-                      size="sm"
-                      color="gray.400"
-                      _hover={{ color: 'white', bg: 'whiteAlpha.100' }}
-                    />
-                    <MenuList bg="gray.800" borderColor="gray.700">
-                      <MenuItem
-                        icon={<EditIcon />}
-                        onClick={() => {
-                          console.log('Setting editing message:', message);
-                          setEditingMessage(message);
-                        }}
-                        bg="gray.800"
-                        _hover={{ bg: 'gray.700' }}
-                        color="white"
-                      >
-                        Edit Message
-                      </MenuItem>
-                      <MenuItem
-                        icon={<DeleteIcon />}
-                        onClick={() => handleDeleteMessage(messageId)}
-                        bg="gray.800"
-                        _hover={{ bg: 'gray.700' }}
-                        color="red.300"
-                      >
-                        Delete Message
-                      </MenuItem>
-                    </MenuList>
-                  </Menu>
-                </Box>
-              )}
+              <Box opacity="0" _groupHover={{ opacity: 1 }} transition="opacity 0.2s">
+                <Menu>
+                  <MenuButton
+                    as={IconButton}
+                    icon={<BsThreeDotsVertical />}
+                    variant="ghost"
+                    size="sm"
+                    color="gray.400"
+                    _hover={{ color: 'white', bg: 'whiteAlpha.100' }}
+                  />
+                  <MenuList bg="gray.800" borderColor="gray.700">
+                    {/* AI suggestion options for other users' messages */}
+                    {!isOwn && (
+                      <>
+                        <MenuItem
+                          icon={<AiOutlineRobot />}
+                          onClick={() => handleSuggestReply(message)}
+                          bg="gray.800"
+                          _hover={{ bg: 'gray.700' }}
+                          color="white"
+                        >
+                          Quick Reply Suggestion
+                        </MenuItem>
+                        <MenuItem
+                          icon={<AiOutlineRobot />}
+                          onClick={() => handleSuggestReplyWithContext(message)}
+                          bg="gray.800"
+                          _hover={{ bg: 'gray.700' }}
+                          color="white"
+                        >
+                          Contextual Reply Suggestion
+                        </MenuItem>
+                      </>
+                    )}
+
+                    {/* Edit and Delete options for own messages */}
+                    {isOwn && !isParent && (
+                      <>
+                        <MenuDivider borderColor="gray.700" />
+                        <MenuItem
+                          icon={<EditIcon />}
+                          onClick={() => {
+                            console.log('Setting editing message:', message);
+                            setEditingMessage(message);
+                          }}
+                          bg="gray.800"
+                          _hover={{ bg: 'gray.700' }}
+                          color="white"
+                        >
+                          Edit Message
+                        </MenuItem>
+                        <MenuItem
+                          icon={<DeleteIcon />}
+                          onClick={() => handleDeleteMessage(messageId)}
+                          bg="gray.800"
+                          _hover={{ bg: 'gray.700' }}
+                          color="red.300"
+                        >
+                          Delete Message
+                        </MenuItem>
+                      </>
+                    )}
+                  </MenuList>
+                </Menu>
+              </Box>
             </Flex>
             
             {isEditing ? (
@@ -483,14 +623,68 @@ const ThreadPanel = ({
         })}
       </VStack>
 
-      <Box p={4} borderTop="1px" borderColor="gray.700">
+      {/* Message Input Area */}
+      <Box 
+        p={4} 
+        borderTop="1px" 
+        borderColor="gray.700"
+        bg="gray.800"
+        position="relative"
+      >
         <MessageInput
           onSendMessage={handleSendReply}
           currentChannel={currentChannel}
           placeholder="Reply in thread..."
           showAttachment={false}
+          replyingTo={replyingTo}
+          onCancel={() => setReplyingTo(null)}
+          customStyles={{
+            container: {
+              bg: 'gray.700',
+              borderRadius: 'md',
+              p: 2
+            },
+            input: {
+              color: 'white',
+              _placeholder: { color: 'gray.400' }
+            },
+            sendButton: {
+              colorScheme: 'blue',
+              size: 'sm',
+              px: 4
+            },
+            cancelButton: {
+              variant: 'ghost',
+              colorScheme: 'gray',
+              size: 'sm'
+            }
+          }}
         />
       </Box>
+
+      {/* AI Reply Composer Modal */}
+      {(showAIComposer || internalShowAIComposer) && (selectedMessage || internalSelectedMessage) && (
+        <AutoReplyComposer
+          message={selectedMessage || internalSelectedMessage}
+          threadContext={[
+            parentMessage,
+            ...(selectedMessage?.useFullContext || internalSelectedMessage?.useFullContext
+              ? replies  // Include all replies for contextual suggestions
+              : replies.filter(reply => 
+                  new Date(reply.created_at) < new Date((selectedMessage || internalSelectedMessage).created_at)
+                ))
+          ].filter(Boolean)}
+          onSelectReply={handleSelectAIReply}
+          onClose={() => {
+            if (internalShowAIComposer) {
+              setInternalShowAIComposer(false);
+              setInternalSelectedMessage(null);
+            } else {
+              onAIComposerClose();
+            }
+          }}
+        />
+      )}
     </Flex>
   );
 };

@@ -1,3 +1,4 @@
+import React from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { useSelector, useDispatch } from 'react-redux';
 import { useEffect } from 'react';
@@ -5,6 +6,7 @@ import { selectIsAuthenticated, selectIsLoading, checkAuth } from '../store/slic
 import Login from '../pages/Login';
 import Register from '../pages/Register';
 import Chat from '../pages/Chat';
+import AITester from '../components/ai/AITester';
 import LoadingScreen from '../components/common/LoadingScreen';
 
 const ProtectedRoute = ({ children }) => {
@@ -22,7 +24,7 @@ const ProtectedRoute = ({ children }) => {
   return children;
 };
 
-const AppRoutes = () => {
+const MainRoutes = () => {
   const dispatch = useDispatch();
   const isAuthenticated = useSelector(selectIsAuthenticated);
   const isLoading = useSelector(selectIsLoading);
@@ -40,6 +42,7 @@ const AppRoutes = () => {
 
   return (
     <Routes>
+      {/* Auth Routes */}
       <Route 
         path="/login" 
         element={isAuthenticated ? <Navigate to="/" /> : <Login />} 
@@ -47,6 +50,16 @@ const AppRoutes = () => {
       <Route 
         path="/register" 
         element={isAuthenticated ? <Navigate to="/" /> : <Register />} 
+      />
+
+      {/* Protected Routes */}
+      <Route
+        path="/ai-test"
+        element={
+          <ProtectedRoute>
+            <AITester />
+          </ProtectedRoute>
+        }
       />
       <Route
         path="/"
@@ -56,9 +69,11 @@ const AppRoutes = () => {
           </ProtectedRoute>
         }
       />
-      <Route path="*" element={<Navigate to="/" />} />
+      
+      {/* Catch-all route - redirect to AI test for testing */}
+      <Route path="*" element={<Navigate to="/ai-test" />} />
     </Routes>
   );
 };
 
-export default AppRoutes; 
+export default MainRoutes; 

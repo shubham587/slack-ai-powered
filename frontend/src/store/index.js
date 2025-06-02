@@ -5,6 +5,7 @@ import authReducer from './slices/authSlice';
 import channelsReducer from './slices/channelsSlice';
 import messagesReducer from './slices/messagesSlice';
 import invitationsReducer from './slices/invitationsSlice';
+import aiReducer from './slices/aiSlice';
 
 export const store = configureStore({
   reducer: {
@@ -13,6 +14,7 @@ export const store = configureStore({
     channels: channelsReducer,
     messages: messagesReducer,
     invitations: invitationsReducer,
+    ai: aiReducer,
   },
   middleware: (getDefaultMiddleware) =>
     getDefaultMiddleware({

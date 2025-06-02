@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import {
   Box,
-  Input,
+  Textarea,
   IconButton,
   HStack,
   useToast,
@@ -10,24 +10,31 @@ import {
   VStack,
   Text,
   Flex,
+  Input,
 } from '@chakra-ui/react';
-import { AttachmentIcon, SmallCloseIcon } from '@chakra-ui/icons';
+import { AttachmentIcon, SmallCloseIcon, CloseIcon } from '@chakra-ui/icons';
 import { FiSend } from 'react-icons/fi';
+import { AiOutlineRobot } from 'react-icons/ai';
 import FileUpload from './FileUpload';
+import AutoReplyComposer from '../ai/AutoReplyComposer';
 
 const MessageInput = ({ 
   onSendMessage, 
   currentChannel, 
-  handleTyping,
-  placeholder,
+  placeholder = 'Type a message...', 
   showAttachment = true,
   initialMessage = '',
-  onCancel
+  onCancel,
+  replyingTo,
+  customStyles = {}
 }) => {
   const [message, setMessage] = useState(initialMessage);
   const [showFileUpload, setShowFileUpload] = useState(false);
   const [selectedFile, setSelectedFile] = useState(null);
+  const [showAiSuggestions, setShowAiSuggestions] = useState(false);
+  const [replyToMessage, setReplyToMessage] = useState(null);
   const toast = useToast();
+  const fileInputRef = React.useRef(null);
 
   // Update message when initialMessage changes
   useEffect(() => {
@@ -39,6 +46,8 @@ const MessageInput = ({
     // Clear file state when changing channels
     setSelectedFile(null);
     setShowFileUpload(false);
+    setShowAiSuggestions(false);
+    setReplyToMessage(null);
     if (!initialMessage) {
       setMessage('');
     }
@@ -88,97 +97,180 @@ const MessageInput = ({
     setSelectedFile(null);
   };
 
+  const handleSelectReply = (replyText) => {
+    setMessage(replyText);
+    setShowAiSuggestions(false);
+  };
+
+  const handleAiClick = () => {
+    // If we have a message typed, use it for improvement
+    if (message.trim()) {
+      setReplyToMessage({
+        content: message.trim(),
+        created_at: new Date().toISOString(),
+        draft: true,
+        is_improvement: true, // Flag to indicate this is for improvement
+        useFullContext: false // No thread context needed for direct improvements
+      });
+      setShowAiSuggestions(true);
+    } else {
+      toast({
+        title: 'Please enter a message first',
+        status: 'warning',
+        duration: 2000,
+        isClosable: true,
+      });
+    }
+  };
+
+  const handleKeyDown = (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleSubmit(e);
+    }
+  };
+
+  const handleAttachmentClick = () => {
+    fileInputRef.current.click();
+  };
+
+  const handleFileChange = (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      handleFileSelect(file);
+    }
+  };
+
+  const handleSend = () => {
+    handleSubmit(new Event('submit'));
+  };
+
   return (
-    <Box w="100%" maxW="100%">
-      <Collapse in={showFileUpload}>
-        <Box mb={4}>
-          <FileUpload
-            key={currentChannel?.id || 'no-channel'}
-            onFileSelect={handleFileSelect}
-            onRemove={handleFileRemove}
+    <Box {...customStyles.container}>
+      {replyingTo && (
+        <Flex 
+          align="center" 
+          justify="space-between" 
+          mb={2} 
+          p={2} 
+          bg="gray.700" 
+          borderRadius="md"
+        >
+          <Text fontSize="sm" color="gray.400">
+            Replying to {replyingTo.username}
+          </Text>
+          <IconButton
+            icon={<CloseIcon />}
+            size="xs"
+            variant="ghost"
+            onClick={() => onCancel()}
           />
-        </Box>
-      </Collapse>
+        </Flex>
+      )}
       
-      <form onSubmit={handleSubmit} style={{ width: '100%' }}>
-        <VStack spacing={3} w="100%">
-          {selectedFile && (
-            <Flex
-              w="100%"
-              bg="gray.700"
-              p={2}
-              borderRadius="md"
-              alignItems="center"
-              justifyContent="space-between"
-            >
-              <Text fontSize="sm" color="gray.300" isTruncated maxW="calc(100% - 40px)">
-                Attached: {selectedFile.name}
-              </Text>
-              <IconButton
-                icon={<SmallCloseIcon />}
-                size="sm"
-                variant="ghost"
-                onClick={handleFileRemove}
-                aria-label="Remove file"
-                flexShrink={0}
-              />
-            </Flex>
-          )}
-          
-          <HStack width="100%" spacing={2}>
-            {showAttachment && (
-              <IconButton
-                icon={<AttachmentIcon />}
-                variant="ghost"
-                colorScheme="whiteAlpha"
-                onClick={() => setShowFileUpload(!showFileUpload)}
-                aria-label="Attach file"
-                flexShrink={0}
-              />
-            )}
-            <Input
-              value={message}
-              onChange={(e) => {
-                setMessage(e.target.value);
-                handleTyping?.();
-              }}
-              placeholder={placeholder || (currentChannel ? `Message #${currentChannel.name}` : 'Select a channel to start messaging')}
-              size="lg"
-              bg="white"
-              color="gray.800"
-              border="1px"
-              borderColor="gray.300"
-              _hover={{ borderColor: 'gray.400' }}
-              _focus={{ borderColor: 'blue.500', boxShadow: 'none' }}
-              _placeholder={{ color: 'gray.500' }}
-              disabled={!currentChannel}
-              flex={1}
-              minW={0}
-            />
-            <Button
-              colorScheme="blue"
-              type="submit"
-              disabled={!currentChannel || (!message.trim() && !selectedFile)}
-              leftIcon={<FiSend />}
-              flexShrink={0}
-            >
-              Send
-            </Button>
-            {onCancel && (
-              <Button
-                variant="ghost"
-                onClick={() => {
-                  setMessage('');
-                  onCancel();
-                }}
-                flexShrink={0}
-              >
-                Cancel
-              </Button>
-            )}
-          </HStack>
-        </VStack>
-      </form>
+      <Flex gap={2}>
+        {showAttachment && (
+          <IconButton
+            icon={<AttachmentIcon />}
+            onClick={handleAttachmentClick}
+            variant="ghost"
+            colorScheme="whiteAlpha"
+            size="md"
+            {...customStyles.attachButton}
+          />
+        )}
+        
+        <Input
+          type="file"
+          ref={fileInputRef}
+          display="none"
+          onChange={handleFileChange}
+        />
+        
+        <Textarea
+          value={message}
+          onChange={(e) => setMessage(e.target.value)}
+          onKeyDown={handleKeyDown}
+          placeholder={placeholder}
+          resize="none"
+          rows={1}
+          bg="transparent"
+          border="none"
+          _focus={{ border: 'none', boxShadow: 'none' }}
+          flex="1"
+          {...customStyles.input}
+        />
+        
+        <IconButton
+          icon={<AiOutlineRobot />}
+          onClick={handleAiClick}
+          isDisabled={!message.trim()}
+          variant="ghost"
+          colorScheme="whiteAlpha"
+          size="md"
+          {...customStyles.aiButton}
+        />
+        
+        <Button
+          onClick={handleSend}
+          isDisabled={!message.trim() && !selectedFile}
+          colorScheme="blue"
+          {...customStyles.sendButton}
+        >
+          Send
+        </Button>
+        
+        {onCancel && (
+          <Button
+            onClick={() => {
+              setMessage('');  // Clear the message
+              setSelectedFile(null);  // Clear any selected file
+              setShowFileUpload(false);  // Hide file upload if shown
+              setShowAiSuggestions(false);  // Hide AI suggestions if shown
+              onCancel();  // Call the parent's onCancel handler
+            }}
+            {...customStyles.cancelButton}
+          >
+            Cancel
+          </Button>
+        )}
+      </Flex>
+
+      {selectedFile && (
+        <Flex 
+          mt={2} 
+          p={2} 
+          bg="gray.700" 
+          borderRadius="md" 
+          align="center" 
+          justify="space-between"
+        >
+          <Text fontSize="sm" color="gray.300" isTruncated>
+            {selectedFile.name}
+          </Text>
+          <IconButton
+            icon={<CloseIcon />}
+            size="xs"
+            variant="ghost"
+            onClick={() => setSelectedFile(null)}
+          />
+        </Flex>
+      )}
+
+      {showAiSuggestions && replyToMessage && (
+        <AutoReplyComposer
+          message={{
+            ...replyToMessage,
+            is_improvement: true // Ensure improvement mode is set
+          }}
+          threadContext={[]} // No thread context needed for improvements
+          onSelectReply={handleSelectReply}
+          onClose={() => {
+            setShowAiSuggestions(false);
+            setReplyToMessage(null);
+          }}
+        />
+      )}
     </Box>
   );
 };

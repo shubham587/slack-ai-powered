@@ -1,9 +1,10 @@
 from werkzeug.security import generate_password_hash, check_password_hash
+from flask_login import UserMixin
 from app import db
 from datetime import datetime
 from bson import ObjectId
 
-class User:
+class User(UserMixin):
     def __init__(self, username, email, password=None, _id=None):
         self._id = _id or ObjectId()
         self.username = username
@@ -11,6 +12,19 @@ class User:
         self.password_hash = generate_password_hash(password, method='pbkdf2:sha256') if password else None
         self.created_at = datetime.utcnow()
         self.updated_at = datetime.utcnow()
+        self.is_active = True
+        self.tier = 'free'  # Default tier for rate limiting
+
+    def get_id(self):
+        return str(self._id)
+
+    @property
+    def is_authenticated(self):
+        return True
+
+    @property
+    def is_anonymous(self):
+        return False
 
     @staticmethod
     def create(username, email, password):
@@ -24,9 +38,14 @@ class User:
 
     @staticmethod
     def get_by_id(user_id):
-        user_data = db.users.find_one({'_id': ObjectId(user_id)})
-        if user_data:
-            return User.from_dict(user_data)
+        try:
+            if isinstance(user_id, str):
+                user_id = ObjectId(user_id)
+            user_data = db.users.find_one({'_id': user_id})
+            if user_data:
+                return User.from_dict(user_data)
+        except:
+            pass
         return None
 
     @staticmethod
@@ -53,7 +72,9 @@ class User:
             'email': self.email,
             'password_hash': self.password_hash,
             'created_at': self.created_at,
-            'updated_at': self.updated_at
+            'updated_at': self.updated_at,
+            'is_active': self.is_active,
+            'tier': self.tier
         }
 
     @staticmethod
@@ -66,6 +87,8 @@ class User:
         user.password_hash = data['password_hash']
         user.created_at = data['created_at']
         user.updated_at = data['updated_at']
+        user.is_active = data.get('is_active', True)
+        user.tier = data.get('tier', 'free')
         return user
 
     def update(self, data):
@@ -76,6 +99,10 @@ class User:
             updates['email'] = data['email']
         if 'password' in data:
             updates['password_hash'] = generate_password_hash(data['password'], method='pbkdf2:sha256')
+        if 'tier' in data:
+            updates['tier'] = data['tier']
+        if 'is_active' in data:
+            updates['is_active'] = data['is_active']
         
         if updates:
             updates['updated_at'] = datetime.utcnow()
@@ -89,5 +116,7 @@ class User:
             'username': self.username,
             'email': self.email,
             'created_at': self.created_at.isoformat(),
-            'updated_at': self.updated_at.isoformat()
+            'updated_at': self.updated_at.isoformat(),
+            'tier': self.tier,
+            'is_active': self.is_active
         } 
