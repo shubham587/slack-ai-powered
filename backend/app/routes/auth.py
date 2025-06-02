@@ -221,4 +221,81 @@ def update_settings():
 
         return jsonify({'settings': settings}), 200
     except Exception as e:
-        return jsonify({'error': str(e)}), 500 
+        return jsonify({'error': str(e)}), 500
+
+@auth_bp.route('/test-user', methods=['POST'])
+def create_test_user():
+    """Create a test user for development"""
+    try:
+        data = request.get_json()
+        username = data.get('username', 'testuser')
+        email = data.get('email', 'test@example.com')
+        password = data.get('password', 'testpass123')
+        
+        # Check if user already exists
+        if db.users.find_one({'username': username}) or db.users.find_one({'email': email}):
+            return jsonify({'error': 'User already exists'}), 400
+            
+        # Create user
+        user = {
+            '_id': ObjectId(),
+            'username': username,
+            'email': email,
+            'password': generate_password_hash(password, method='pbkdf2:sha256'),
+            'display_name': username,
+            'avatar_url': None
+        }
+        
+        # Insert user into database
+        db.users.insert_one(user)
+        
+        # Generate token
+        token = create_access_token(identity=str(user['_id']))
+        
+        return jsonify({
+            'token': token,
+            'user': {
+                'id': str(user['_id']),
+                'username': user['username'],
+                'email': user['email'],
+                'display_name': user['display_name'],
+                'avatar_url': user['avatar_url']
+            }
+        }), 201
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@auth_bp.route('/debug', methods=['GET'])
+def debug():
+    """Debug endpoint to check MongoDB connection"""
+    try:
+        # Test MongoDB connection
+        users = list(db.users.find())
+        channels = list(db.channels.find())
+        
+        return jsonify({
+            'status': 'ok',
+            'user_count': len(users),
+            'channel_count': len(channels),
+            'users': [
+                {
+                    'id': str(user['_id']),
+                    'username': user['username'],
+                    'email': user['email']
+                } for user in users
+            ],
+            'channels': [
+                {
+                    'id': str(channel['_id']),
+                    'name': channel['name'],
+                    'is_direct': channel.get('is_direct', False)
+                } for channel in channels
+            ]
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'error': str(e)
+        }), 500 

@@ -1,7 +1,7 @@
 from flask import Flask
+from flask_socketio import SocketIO
 from flask_cors import CORS
 from flask_jwt_extended import JWTManager
-from flask_socketio import SocketIO
 from flask_login import LoginManager
 from pymongo import MongoClient
 from dotenv import load_dotenv
@@ -14,8 +14,8 @@ load_dotenv()
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 
-# Initialize Flask-SocketIO with CORS support
-socketio = SocketIO(cors_allowed_origins=["http://localhost:5173", "http://localhost:5174"])
+# Initialize Flask-SocketIO
+socketio = SocketIO(cors_allowed_origins="*")
 
 # Initialize MongoDB
 client = MongoClient(os.getenv('MONGODB_URI', 'mongodb://localhost:27017/'))
@@ -35,11 +35,12 @@ def create_app(test_config=None):
     
     # Configure CORS
     CORS(app, resources={
-        r"/api/*": {
-            "origins": ["http://localhost:5173"],  # Your frontend origin
+        r"/*": {
+            "origins": ["http://localhost:5173"],
             "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
             "allow_headers": ["Content-Type", "Authorization"],
-            "supports_credentials": True
+            "supports_credentials": True,
+            "expose_headers": ["Content-Type", "Authorization"]
         }
     })
     
@@ -74,7 +75,7 @@ def create_app(test_config=None):
         return None
     
     # Initialize socketio with app
-    socketio.init_app(app, async_mode='eventlet')
+    socketio.init_app(app)
     
     # Import blueprints
     from app.routes.auth import auth_bp
@@ -100,5 +101,27 @@ def create_app(test_config=None):
     # Create uploads directory if it doesn't exist
     uploads_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'uploads')
     os.makedirs(uploads_dir, exist_ok=True)
+    
+    # Socket event handlers
+    @socketio.on('connect')
+    def handle_connect():
+        print("Client connected")
+
+    @socketio.on('disconnect')
+    def handle_disconnect():
+        print("Client disconnected")
+
+    @socketio.on('join')
+    def handle_join(data):
+        if 'channel' in data:
+            print(f"Client joining channel: {data['channel']}")
+            socketio.emit('user_joined', {'channel': data['channel']}, room=data['channel'])
+
+    @socketio.on('join_user_room')
+    def handle_join_user_room(data):
+        if 'user_id' in data:
+            user_id = str(data['user_id'])
+            print(f"User {user_id} joining their personal room")
+            socketio.emit('user_room_joined', {'user_id': user_id}, room=user_id)
     
     return app

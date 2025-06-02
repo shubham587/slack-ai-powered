@@ -6,6 +6,7 @@ from bson import ObjectId
 from datetime import datetime
 from app.models.channel import Channel
 from flask import current_app
+from app.models.file import File
 
 bp = Blueprint('messages', __name__, url_prefix='/api/messages')
 
@@ -14,38 +15,44 @@ bp = Blueprint('messages', __name__, url_prefix='/api/messages')
 def get_channel_messages(channel_id):
     """Get messages for a channel"""
     try:
-        # Convert string ID to ObjectId
-        channel_id = ObjectId(channel_id)
+        print(f"\n=== Loading Channel Messages ===")
+        print(f"Channel ID: {channel_id}")
         
         # Get pagination parameters
         before = request.args.get('before')
         limit = int(request.args.get('limit', 50))
         
-        # Get messages
-        messages = Message.get_channel_messages(
-            channel_id=channel_id,
-            limit=limit,
-            before=before
-        )
-        
-        # Update reply counts for each message
-        for message in messages:
-            # Count actual replies
-            reply_count = db.messages.count_documents({
-                'parent_id': message._id
-            })
+        try:
+            # Convert channel_id to ObjectId since that's how it's stored
+            channel_id_obj = ObjectId(channel_id)
             
-            # Update message if count is different
-            if reply_count != message.reply_count:
-                db.messages.update_one(
-                    {'_id': message._id},
-                    {'$set': {'reply_count': reply_count}}
-                )
-                message.reply_count = reply_count
-        
-        return jsonify([msg.to_response_dict() for msg in messages])
+            # Build query
+            query = {'channel_id': channel_id_obj}
+            if before:
+                query['created_at'] = {'$lt': datetime.fromisoformat(before)}
+            
+            # Query messages
+            messages = list(db.messages.find(
+                query,
+                sort=[('created_at', -1)],
+                limit=limit
+            ))
+            print(f"Found {len(messages)} messages")
+            
+            # Convert to Message objects and format response
+            message_list = []
+            for msg in messages:
+                msg_obj = Message.from_dict(msg)
+                message_list.append(msg_obj.to_response_dict())
+            
+            return jsonify(message_list)
+            
+        except Exception as e:
+            print(f"Error processing messages: {str(e)}")
+            return jsonify({'error': f'Failed to load messages: {str(e)}'}), 400
         
     except Exception as e:
+        print(f"Error in get_channel_messages: {str(e)}")
         return jsonify({'error': str(e)}), 400
 
 @bp.route('/channel/<channel_id>', methods=['POST'])
@@ -53,118 +60,80 @@ def get_channel_messages(channel_id):
 def send_message(channel_id):
     """Send a message to a channel"""
     try:
-        print("\n=== New Message Request ===")
+        print("\n=== Processing New Message ===")
         print(f"Channel ID: {channel_id}")
-        print(f"Content-Type: {request.content_type}")
-        print(f"Files: {list(request.files.keys()) if request.files else 'No files'}")
-        print(f"Form Data: {list(request.form.keys()) if request.form else 'No form data'}")
         
-        # Convert string ID to ObjectId
-        try:
-            channel_id_obj = ObjectId(channel_id)
-            print(f"Valid ObjectId: {channel_id_obj}")
-        except Exception as e:
-            print(f"Invalid channel ID format: {channel_id}, error: {str(e)}")
-            return jsonify({'error': f'Invalid channel ID format: {str(e)}'}), 400
+        # Get current user
+        user_id = ObjectId(get_jwt_identity())
+        channel_id_obj = ObjectId(channel_id)
         
-        # Get user ID and verify token
-        try:
-            user_id = ObjectId(get_jwt_identity())
-            print(f"Authenticated User ID: {user_id}")
-        except Exception as e:
-            print(f"Authentication error: {str(e)}")
-            return jsonify({'error': 'Invalid authentication token'}), 401
-        
-        # Check if channel exists and user is a member
-        channel = db.channels.find_one({
-            '_id': channel_id_obj,
-            'members': user_id
-        })
-        
+        # Check if channel exists
+        channel = Channel.get_by_id(channel_id)
         if not channel:
-            print(f"Channel access error: Channel not found or user {user_id} not a member of channel {channel_id}")
-            return jsonify({'error': 'Channel not found or you are not a member'}), 404
-        
-        print(f"Channel access verified: {channel.get('name', 'unnamed')}")
-        
+            print("Error: Channel not found")
+            return jsonify({'error': 'Channel not found'}), 404
+            
+        # Check if user is member of channel
+        if str(user_id) not in [str(member_id) for member_id in channel.members]:
+            print("Error: User not in channel")
+            return jsonify({'error': 'You are not a member of this channel'}), 403
+            
         # Handle file upload
         if 'file' in request.files:
+            print("\n=== Processing File Upload ===")
             file = request.files['file']
             content = request.form.get('content', '')
             
-            print("\n=== File Upload Details ===")
-            print(f"Filename: {file.filename}")
-            print(f"Content Type: {file.content_type}")
-            print(f"MIME Type: {file.mimetype}")
-            
-            if not file or not file.filename:
-                print("Error: Missing file or filename")
-                return jsonify({'error': 'No file provided'}), 400
-            
-            # Upload file
-            from app.models.file import File
             try:
-                # Read file content and get size
-                file_content = file.read()
-                file_size = len(file_content)
-                
-                print(f"File size: {file_size} bytes")
-                
-                if file_size == 0:
-                    print("Error: Empty file")
-                    return jsonify({'error': 'Empty file provided'}), 400
-                
-                if file_size > 16 * 1024 * 1024:  # 16MB limit
-                    print("Error: File too large")
-                    return jsonify({'error': 'File size exceeds 16MB limit'}), 400
-                
-                # Determine file type based on extension
-                file_type = 'document'  # default
-                if file.filename.lower().endswith(('.jpg', '.jpeg', '.png', '.gif')):
-                    file_type = 'image'
-                elif file.filename.lower().endswith(('.py', '.js', '.jsx', '.ts', '.tsx', '.json', '.html', '.css')):
-                    file_type = 'code'
-                elif file.filename.lower().endswith(('.zip', '.rar', '.7z', '.tar', '.gz')):
-                    file_type = 'archive'
-                
-                file_obj = File.create(
-                    filename=file.filename,
-                    content_type=file.content_type or file.mimetype,
-                    size=file_size,
-                    uploader_id=user_id,
-                    file_type=file_type
-                )
-                
-                # Save the file
-                file_obj.save_file(file_content)
-                print(f"File saved successfully with ID: {file_obj._id}")
-                
-                # Create message with file attachment
+                # Create message with file
                 message = Message.create(
                     channel_id=channel_id_obj,
                     sender_id=user_id,
                     content=content,
-                    message_type='file',
-                    file_id=file_obj._id
+                    message_type='file'
                 )
                 
-                print(f"Message created with ID: {message._id}")
+                # Save file and update message
+                file_obj = File.save_file(file, message._id)
                 
-                # Add file metadata to message response
+                # Update message with file info
+                db.messages.update_one(
+                    {'_id': message._id},
+                    {'$set': {
+                        'file': file_obj.to_dict(),
+                        'file_id': str(file_obj._id)
+                    }}
+                )
+                
+                # Get updated message
+                message = Message.from_dict(
+                    db.messages.find_one({'_id': message._id})
+                )
+                
+                print(f"File message created with ID: {message._id}")
+                
+                # Get message data for response
                 message_data = message.to_response_dict()
-                message_data['file'] = file_obj.to_response_dict()
                 
-                # Emit message to channel subscribers
+                # Update channel's last_message_at
+                channel.update({'last_message_at': datetime.utcnow()})
+                
+                # Emit to channel room
+                print(f"Emitting message to channel room: {channel_id}")
+                socketio.emit('message_created', message_data, room=str(channel_id))
                 socketio.emit('new_message', message_data, room=str(channel_id))
+                
+                # Also emit to each member's personal room
+                print(f"Emitting message to member rooms: {[str(m) for m in channel.members]}")
+                for member_id in channel.members:
+                    socketio.emit('message_created', message_data, room=str(member_id))
+                    socketio.emit('new_message', message_data, room=str(member_id))
                 
                 return jsonify(message_data), 201
                 
-            except ValueError as e:
-                print(f"File processing error: {str(e)}")
-                return jsonify({'error': f'Error processing file: {str(e)}'}), 400
             except Exception as e:
-                print(f"Unexpected file processing error: {str(e)}")
-                return jsonify({'error': 'Failed to process file upload'}), 500
+                print(f"File upload error: {str(e)}")
+                return jsonify({'error': f'Error uploading file: {str(e)}'}), 400
                 
         else:
             # Handle regular text message
@@ -187,9 +156,22 @@ def send_message(channel_id):
                 
                 print(f"Message created with ID: {message._id}")
                 
-                # Emit message to channel subscribers
+                # Get message data for response
                 message_data = message.to_response_dict()
+                
+                # Update channel's last_message_at
+                channel.update({'last_message_at': datetime.utcnow()})
+                
+                # Emit to channel room
+                print(f"Emitting message to channel room: {channel_id}")
+                socketio.emit('message_created', message_data, room=str(channel_id))
                 socketio.emit('new_message', message_data, room=str(channel_id))
+                
+                # Also emit to each member's personal room
+                print(f"Emitting message to member rooms: {[str(m) for m in channel.members]}")
+                for member_id in channel.members:
+                    socketio.emit('message_created', message_data, room=str(member_id))
+                    socketio.emit('new_message', message_data, room=str(member_id))
                 
                 return jsonify(message_data), 201
                 
@@ -370,16 +352,24 @@ def get_direct_messages(user_id):
         
         # Get messages for this channel
         messages = list(db.messages.find(
-            {'channel_id': channel._id},
+            {'channel_id': str(channel._id)},  # Convert ObjectId to string
             sort=[('created_at', 1)]
         ))
         
+        # Convert messages to response format
+        message_list = []
+        for msg in messages:
+            msg_obj = Message.from_dict(msg)
+            msg_obj.is_direct = True  # Set is_direct flag
+            message_list.append(msg_obj.to_response_dict())
+        
         return jsonify({
             'channel_id': str(channel._id),
-            'messages': [Message.from_dict(msg).to_response_dict() for msg in messages]
+            'messages': message_list
         })
         
     except Exception as e:
+        print(f"Error in get_direct_messages: {str(e)}")  # Add debug logging
         return jsonify({'error': str(e)}), 400
 
 @bp.route('/recent-chats', methods=['GET'])
@@ -387,41 +377,64 @@ def get_direct_messages(user_id):
 def get_recent_chats():
     """Get list of recent direct message conversations"""
     try:
-        current_user_id = ObjectId(get_jwt_identity())
+        # Get user ID from JWT token
+        user_id = get_jwt_identity()
+        print(f"\n=== Loading Recent Chats ===")
+        print(f"User ID from token: {user_id}")
         
-        # Find all DM channels for current user
-        dm_channels = list(db.channels.find({
+        if not user_id:
+            print("No user ID found in token")
+            return jsonify({'error': 'No user ID found in token'}), 401
+
+        try:
+            current_user_id = ObjectId(user_id)
+            print(f"Converted user ID to ObjectId: {current_user_id}")
+        except Exception as e:
+            print(f"Error converting user ID to ObjectId: {str(e)}")
+            return jsonify({'error': 'Invalid user ID format'}), 400
+        
+        # Find all direct message channels for the current user
+        channels = db.channels.find({
             'is_direct': True,
             'members': current_user_id
-        }))
-        
+        })
+
+        # Convert channels to list and process
         recent_chats = []
-        for channel in dm_channels:
-            # Get the other user in the DM
-            other_user_id = next(m for m in channel['members'] if m != current_user_id)
-            other_user = db.users.find_one({'_id': other_user_id})
-            
-            # Get most recent message
-            last_message = db.messages.find_one(
-                {'channel_id': channel['_id']},
-                sort=[('created_at', -1)]
+        for channel in channels:
+            # Find the other user in the DM
+            other_user_id = next(
+                (member for member in channel['members'] if member != current_user_id),
+                None
             )
             
-            if other_user:
-                recent_chats.append({
-                    'user': {
-                        'id': str(other_user['_id']),
-                        'username': other_user['username'],
-                        'display_name': other_user.get('display_name', other_user['username']),
-                        'avatar_url': other_user.get('avatar_url')
-                    },
-                    'last_message': Message.from_dict(last_message).to_response_dict() if last_message else None
-                })
-        
-        return jsonify(recent_chats)
-        
+            if other_user_id:
+                # Get the other user's details
+                other_user = db.users.find_one({'_id': other_user_id})
+                if other_user:
+                    # Get the last message in this channel
+                    last_message = db.messages.find_one(
+                        {'channel_id': str(channel['_id'])},
+                        sort=[('created_at', -1)]
+                    )
+
+                    recent_chats.append({
+                        'channel_id': str(channel['_id']),
+                        'user': {
+                            'id': str(other_user['_id']),
+                            'username': other_user['username'],
+                            'display_name': other_user.get('display_name', other_user['username']),
+                            'avatar_url': other_user.get('avatar_url')
+                        },
+                        'last_message': last_message['content'] if last_message else None
+                    })
+
+        print(f"Found {len(recent_chats)} recent chats")
+        return jsonify(recent_chats), 200
+
     except Exception as e:
-        return jsonify({'error': str(e)}), 400
+        print(f"Error in get_recent_chats: {str(e)}")
+        return jsonify({'error': str(e)}), 500
 
 @bp.route('/direct/<user_id>', methods=['POST'])
 @jwt_required()

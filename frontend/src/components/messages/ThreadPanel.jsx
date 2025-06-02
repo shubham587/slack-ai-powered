@@ -14,6 +14,7 @@ import {
   MenuDivider,
   useToast,
   Button,
+  Tooltip,
 } from '@chakra-ui/react';
 import { CloseIcon, EditIcon, DeleteIcon, ChatIcon } from '@chakra-ui/icons';
 import { BsThreeDotsVertical } from 'react-icons/bs';
@@ -23,6 +24,10 @@ import AutoReplyComposer from '../ai/AutoReplyComposer';
 import { getSocket } from '../../socket';
 import { useSelector } from 'react-redux';
 import { selectUser } from '../../store/slices/authSlice';
+
+const MIN_WIDTH = 400; // Minimum width in pixels
+const MAX_WIDTH = 800; // Maximum width in pixels
+const DEFAULT_WIDTH = 500; // Default width in pixels
 
 const ThreadPanel = ({ 
   parentMessage, 
@@ -38,6 +43,8 @@ const ThreadPanel = ({
   const [internalSelectedMessage, setInternalSelectedMessage] = useState(null);
   const [internalShowAIComposer, setInternalShowAIComposer] = useState(false);
   const [replyingTo, setReplyingTo] = useState(null);
+  const [width, setWidth] = useState(DEFAULT_WIDTH);
+  const [isResizing, setIsResizing] = useState(false);
   const toast = useToast();
   const currentUser = useSelector(selectUser);
 
@@ -588,23 +595,94 @@ const ThreadPanel = ({
     );
   };
 
+  // Handle mouse move during resize
+  useEffect(() => {
+    const handleMouseMove = (e) => {
+      if (!isResizing) return;
+      
+      // Calculate new width based on mouse position
+      const newWidth = window.innerWidth - e.clientX;
+      
+      // Clamp width between min and max values
+      const clampedWidth = Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, newWidth));
+      
+      setWidth(clampedWidth);
+    };
+
+    const handleMouseUp = () => {
+      setIsResizing(false);
+    };
+
+    if (isResizing) {
+      document.addEventListener('mousemove', handleMouseMove);
+      document.addEventListener('mouseup', handleMouseUp);
+    }
+
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [isResizing]);
+
   return (
-    <Flex direction="column" h="100%" bg="gray.800">
-      <Flex 
-        h="64px" 
-        px={4} 
-        align="center" 
-        justify="space-between" 
-        borderBottom="1px" 
-        borderColor="gray.700"
+    <Flex
+      direction="column"
+      h="100vh"
+      w={`${width}px`}
+      bg="gray.800"
+      position="fixed"
+      right={0}
+      top={0}
+      zIndex={20}
+      borderLeft="1px solid"
+      borderColor="gray.700"
+      transition="width 0.2s"
+      _hover={{
+        '& .resize-handle': {
+          opacity: 1
+        }
+      }}
+    >
+      {/* Resize Handle */}
+      <Box
+        className="resize-handle"
+        position="absolute"
+        left={-2}
+        top={0}
+        w={4}
+        h="100%"
+        cursor="ew-resize"
+        opacity={0}
+        _hover={{ opacity: 1 }}
+        transition="opacity 0.2s"
+        onMouseDown={() => setIsResizing(true)}
       >
-        <Text color="white" fontWeight="medium">Thread</Text>
+        <Box
+          w={1}
+          h="100%"
+          bg="blue.500"
+          mx="auto"
+          opacity={isResizing ? 1 : 0.5}
+        />
+      </Box>
+
+      {/* Header */}
+      <Flex 
+        p={4} 
+        borderBottom="1px" 
+        borderColor="gray.700" 
+        align="center" 
+        justify="space-between"
+      >
+        <Text fontSize="lg" fontWeight="semibold" color="white">
+          Thread
+        </Text>
         <IconButton
           icon={<CloseIcon />}
-          size="sm"
+          onClick={onClose}
           variant="ghost"
           colorScheme="whiteAlpha"
-          onClick={onClose}
+          size="sm"
         />
       </Flex>
 
@@ -644,38 +722,50 @@ const ThreadPanel = ({
       >
         {/* Quick Reply Button */}
         <Flex justify="center" mb={4}>
-          <Button
-            leftIcon={<AiOutlineRobot />}
-            onClick={() => {
-              // Create message object with thread context
-              const messageWithContext = {
-                ...parentMessage, // Use parent message as the target
-                is_improvement: false,
-                useFullContext: true
-              };
-              
-              console.log('ThreadPanel - AI Reply Button Clicked:', {
-                messageWithContext,
-                parentMessage,
-                replies,
-                fullContext: [parentMessage, ...replies].map(msg => ({
-                  id: msg._id || msg.id,
-                  content: msg.content,
-                  username: msg.username,
-                  created_at: msg.created_at
-                }))
-              });
-              
-              setInternalSelectedMessage(messageWithContext);
-              setInternalShowAIComposer(true);
-            }}
-            variant="outline"
-            colorScheme="blue"
-            size="sm"
-            width="auto"
+          <Tooltip
+            label={`AI will analyze the entire thread (${replies.length + 1} messages) to generate a contextually relevant reply`}
+            placement="top"
+            hasArrow
           >
-            Get AI Reply Suggestion
-          </Button>
+            <Button
+              leftIcon={<AiOutlineRobot />}
+              onClick={() => {
+                // Create message object with thread context
+                const messageWithContext = {
+                  ...parentMessage,
+                  is_improvement: false,
+                  useFullContext: true
+                };
+                
+                console.log('ThreadPanel - AI Reply Button Clicked:', {
+                  messageWithContext,
+                  parentMessage,
+                  replies,
+                  fullContext: [parentMessage, ...replies].map(msg => ({
+                    id: msg._id || msg.id,
+                    content: msg.content,
+                    username: msg.username,
+                    created_at: msg.created_at
+                  }))
+                });
+                
+                setInternalSelectedMessage(messageWithContext);
+                setInternalShowAIComposer(true);
+              }}
+              variant="outline"
+              colorScheme="blue"
+              size="sm"
+              width="auto"
+              display="flex"
+              alignItems="center"
+              gap={2}
+            >
+              <Box>
+                <Text>Get AI Reply Suggestion</Text>
+                {/* <Text fontSize="xs" color="blue.200">Using {replies.length + 1} messages as context</Text> */}
+              </Box>
+            </Button>
+          </Tooltip>
         </Flex>
 
         <MessageInput

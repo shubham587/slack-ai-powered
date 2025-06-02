@@ -2,46 +2,112 @@ from datetime import datetime
 from bson import ObjectId
 from app import db
 from app.models.file import File
+from pydantic import BaseModel
+from typing import List, Optional
 
-class Message:
-    def __init__(self, channel_id, sender_id, content, message_type='text', file_id=None, parent_id=None, _id=None):
-        self._id = _id or ObjectId()
-        self.channel_id = channel_id
-        self.sender_id = sender_id
-        self.content = content
-        self.message_type = message_type  # text, file
-        self.file_id = file_id
-        self.parent_id = parent_id  # For thread replies
-        self.reply_count = 0  # Count of replies in thread
-        self.created_at = datetime.utcnow()
-        self.updated_at = datetime.utcnow()
-        self.delivery_status = {
+class MessageAnalysis(BaseModel):
+    """Model for message tone and impact analysis"""
+    tone: str  # aggressive/weak/neutral/confusing
+    impact: str  # high/medium/low
+    improvements: List[str]
+    reasoning: str
+
+class Message(BaseModel):
+    """Model for chat messages"""
+    id: str
+    content: str
+    sender_id: str
+    channel_id: str
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+    reply_count: Optional[int] = 0
+    parent_id: Optional[str] = None
+    file: Optional[dict] = None
+    is_direct: Optional[bool] = False
+    analysis: Optional[MessageAnalysis] = None  # Add analysis field to messages
+    message_type: Optional[str] = 'text'
+    delivery_status: Optional[dict] = None
+    file_id: Optional[str] = None
+
+    def __init__(self, **data):
+        # Initialize delivery_status before calling super().__init__
+        delivery_status = data.get('delivery_status', {
             'sent': True,
             'delivered': False,
             'read': False,
             'delivered_to': [],
             'read_by': [],
-            'sent_at': datetime.utcnow(),
+            'sent_at': data.get('created_at') or datetime.utcnow(),
             'delivered_at': None,
             'read_at': None
-        }
+        })
+        data['delivery_status'] = delivery_status
+        
+        super().__init__(**data)
+        self._id = data.get('_id') or ObjectId()
+        self.created_at = data.get('created_at') or datetime.utcnow()
+        self.updated_at = data.get('updated_at') or datetime.utcnow()
+        self.reply_count = data.get('reply_count', 0)
+        self.message_type = data.get('message_type', 'text')
 
     @staticmethod
     def create(channel_id, sender_id, content, message_type='text', file_id=None, parent_id=None):
-        message = Message(channel_id, sender_id, content, message_type, file_id, parent_id)
-        result = db.messages.insert_one(message.to_dict())
-        message._id = result.inserted_id
+        """Create a new message"""
+        now = datetime.utcnow()
+        message_data = {
+            'id': str(ObjectId()),  # Generate a new ID
+            'channel_id': str(channel_id) if isinstance(channel_id, ObjectId) else channel_id,
+            'sender_id': str(sender_id) if isinstance(sender_id, ObjectId) else sender_id,
+            'content': content,
+            'message_type': message_type,
+            'file_id': str(file_id) if file_id and isinstance(file_id, ObjectId) else file_id,
+            'parent_id': str(parent_id) if parent_id and isinstance(parent_id, ObjectId) else parent_id,
+            'reply_count': 0,
+            'created_at': now,
+            'updated_at': now,
+            'delivery_status': {
+                'sent': True,
+                'delivered': False,
+                'read': False,
+                'delivered_to': [],
+                'read_by': [],
+                'sent_at': now,
+                'delivered_at': None,
+                'read_at': None
+            }
+        }
         
-        # If this is a reply, increment the parent message's reply count
+        # Create Message instance
+        message = Message(**message_data)
+        
+        # Store the original ObjectIds for database operations
+        message._id = ObjectId(message_data['id'])
+        message._channel_id = channel_id if isinstance(channel_id, ObjectId) else ObjectId(channel_id)
+        message._sender_id = sender_id if isinstance(sender_id, ObjectId) else ObjectId(sender_id)
+        
+        # Insert into database using ObjectIds
+        db_data = {
+            '_id': message._id,
+            'channel_id': message._channel_id,
+            'sender_id': message._sender_id,
+            'content': content,
+            'message_type': message_type,
+            'file_id': file_id if isinstance(file_id, ObjectId) else ObjectId(file_id) if file_id else None,
+            'parent_id': parent_id if isinstance(parent_id, ObjectId) else ObjectId(parent_id) if parent_id else None,
+            'reply_count': 0,
+            'created_at': now,
+            'updated_at': now,
+            'delivery_status': message_data['delivery_status']
+        }
+        
+        db.messages.insert_one(db_data)
+        
+        # If this is a reply, update parent's reply count
         if parent_id:
-            # Get actual reply count
-            reply_count = db.messages.count_documents({
-                'parent_id': ObjectId(parent_id)
-            })
-            
-            # Update parent with accurate count
+            parent_id_obj = parent_id if isinstance(parent_id, ObjectId) else ObjectId(parent_id)
+            reply_count = db.messages.count_documents({'parent_id': parent_id_obj})
             db.messages.update_one(
-                {'_id': ObjectId(parent_id)},
+                {'_id': parent_id_obj},
                 {'$set': {'reply_count': reply_count}}
             )
         
@@ -134,28 +200,38 @@ class Message:
 
     @staticmethod
     def from_dict(data):
+        # Convert ObjectId fields to strings
+        file_id = str(data['file_id']) if data.get('file_id') and isinstance(data['file_id'], ObjectId) else data.get('file_id')
+        file = data.get('file')
+        if isinstance(file, ObjectId):
+            file = {'id': str(file)}
+        
         message = Message(
-            channel_id=data['channel_id'],
-            sender_id=data['sender_id'],
+            id=str(data['_id']),
             content=data['content'],
-            message_type=data['message_type'],
-            file_id=data.get('file_id'),
-            parent_id=data.get('parent_id'),
-            _id=data['_id']
+            sender_id=str(data['sender_id']) if isinstance(data['sender_id'], ObjectId) else data['sender_id'],
+            channel_id=str(data['channel_id']) if isinstance(data['channel_id'], ObjectId) else data['channel_id'],
+            created_at=data['created_at'],
+            updated_at=data.get('updated_at'),
+            reply_count=data.get('reply_count', 0),
+            parent_id=str(data['parent_id']) if data.get('parent_id') else None,
+            file=file,
+            file_id=file_id,
+            is_direct=data.get('is_direct', False),
+            analysis=data.get('analysis'),
+            message_type=data.get('message_type', 'text'),
+            delivery_status=data.get('delivery_status', {
+                'sent': True,
+                'delivered': False,
+                'read': False,
+                'delivered_to': [],
+                'read_by': [],
+                'sent_at': data['created_at'],
+                'delivered_at': None,
+                'read_at': None
+            })
         )
-        message.created_at = data['created_at']
-        message.updated_at = data['updated_at']
-        message.reply_count = data.get('reply_count', 0)
-        message.delivery_status = data.get('delivery_status', {
-            'sent': True,
-            'delivered': False,
-            'read': False,
-            'delivered_to': [],
-            'read_by': [],
-            'sent_at': data['created_at'],
-            'delivered_at': None,
-            'read_at': None
-        })
+        message._id = data['_id']
         return message
 
     def to_dict(self):
@@ -170,25 +246,36 @@ class Message:
             'reply_count': self.reply_count,
             'created_at': self.created_at,
             'updated_at': self.updated_at,
-            'delivery_status': self.delivery_status
+            'delivery_status': self.delivery_status,
+            'is_direct': self.is_direct,
+            'analysis': self.analysis
         }
 
     def to_response_dict(self):
         # Get the sender's username
-        sender = db.users.find_one({'_id': self.sender_id})
-        username = sender['username'] if sender else 'Unknown User'
+        try:
+            # Convert sender_id to ObjectId if it's a string
+            sender_id = ObjectId(self.sender_id) if isinstance(self.sender_id, str) else self.sender_id
+            sender = db.users.find_one({'_id': sender_id})
+            username = sender['username'] if sender else 'Unknown User'
+            display_name = sender.get('display_name', username) if sender else username
+        except Exception as e:
+            print(f"Error finding sender: {str(e)}")
+            username = 'Unknown User'
+            display_name = username
         
         response = {
             'id': str(self._id),
             'channel_id': str(self.channel_id),
             'sender_id': str(self.sender_id),
             'username': username,
+            'display_name': display_name,
             'content': self.content,
             'message_type': self.message_type,
             'parent_id': str(self.parent_id) if self.parent_id else None,
             'reply_count': self.reply_count,
             'created_at': self.created_at.isoformat(),
-            'updated_at': self.updated_at.isoformat(),
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
             'delivery_status': {
                 'sent': self.delivery_status['sent'],
                 'delivered': self.delivery_status['delivered'],

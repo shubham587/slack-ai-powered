@@ -14,8 +14,28 @@ import {
   AlertTitle,
   AlertDescription,
   VStack,
+  Spinner,
 } from '@chakra-ui/react';
-import { CloseIcon, RepeatIcon } from '@chakra-ui/icons';
+import { CloseIcon, RepeatIcon, WarningIcon } from '@chakra-ui/icons';
+
+// Error types for better error handling
+const ERROR_TYPES = {
+  NETWORK: 'network',
+  API: 'api',
+  RATE_LIMIT: 'rate_limit',
+  TOKEN: 'token',
+  SERVER: 'server',
+  UNKNOWN: 'unknown'
+};
+
+const ERROR_MESSAGES = {
+  [ERROR_TYPES.NETWORK]: 'Network error. Please check your connection.',
+  [ERROR_TYPES.API]: 'Failed to get AI suggestions.',
+  [ERROR_TYPES.RATE_LIMIT]: 'Too many requests. Please wait a moment.',
+  [ERROR_TYPES.TOKEN]: 'Authentication error. Please try logging in again.',
+  [ERROR_TYPES.SERVER]: 'Server error. Please try again later.',
+  [ERROR_TYPES.UNKNOWN]: 'An unexpected error occurred.'
+};
 
 const TONE_OPTIONS = [
   { value: 'professional', label: 'Professional' },
@@ -42,17 +62,81 @@ const AutoReplyComposer = ({
   const toast = useToast();
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [errorType, setErrorType] = useState(null);
   const [suggestions, setSuggestions] = useState([]);
   const [selectedTone, setSelectedTone] = useState('professional');
   const [selectedLength, setSelectedLength] = useState('medium');
   const [retryCount, setRetryCount] = useState(0);
 
+  const determineErrorType = (error) => {
+    if (!error) return ERROR_TYPES.UNKNOWN;
+    
+    if (!navigator.onLine) return ERROR_TYPES.NETWORK;
+    
+    if (error.message?.includes('Failed to fetch') || 
+        error.message?.includes('Network Error')) {
+      return ERROR_TYPES.NETWORK;
+    }
+    
+    if (error.response) {
+      switch (error.response.status) {
+        case 401:
+        case 403:
+          return ERROR_TYPES.TOKEN;
+        case 429:
+          return ERROR_TYPES.RATE_LIMIT;
+        case 500:
+        case 502:
+        case 503:
+        case 504:
+          return ERROR_TYPES.SERVER;
+        default:
+          return ERROR_TYPES.API;
+      }
+    }
+    
+    return ERROR_TYPES.UNKNOWN;
+  };
+
+  const handleError = (error) => {
+    console.error('AI Suggestion Error:', error);
+    
+    const type = determineErrorType(error);
+    setErrorType(type);
+    setError(ERROR_MESSAGES[type]);
+    
+    // Show toast for network and token errors
+    if (type === ERROR_TYPES.NETWORK || type === ERROR_TYPES.TOKEN) {
+      toast({
+        title: 'Error',
+        description: ERROR_MESSAGES[type],
+        status: 'error',
+        duration: 5000,
+        isClosable: true,
+      });
+    }
+    
+    // Auto-retry for network and server errors
+    if ((type === ERROR_TYPES.NETWORK || type === ERROR_TYPES.SERVER) && 
+        retryCount < MAX_RETRIES) {
+      setTimeout(() => {
+        setRetryCount(prev => prev + 1);
+        fetchSuggestions();
+      }, RETRY_DELAY * (retryCount + 1));
+    }
+  };
+
   const fetchSuggestions = async () => {
     try {
       setIsLoading(true);
       setError(null);
+      setErrorType(null);
       
       const token = localStorage.getItem('token');
+      if (!token) {
+        throw new Error('No authentication token found');
+      }
+      
       const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:5001';
       
       // Choose endpoint based on whether it's a quick reply or contextual reply
@@ -89,12 +173,12 @@ const AutoReplyComposer = ({
       
       if (data.status === 'success' && data.suggestions) {
         setSuggestions(data.suggestions);
+        setRetryCount(0); // Reset retry count on success
       } else {
         throw new Error('Invalid response format');
       }
     } catch (error) {
-      console.error('Error fetching suggestions:', error);
-      setError(error.message);
+      handleError(error);
     } finally {
       setIsLoading(false);
     }
@@ -109,15 +193,31 @@ const AutoReplyComposer = ({
   };
 
   const handleSelectReply = (suggestion) => {
-    onSelectReply(suggestion.text);
-    onClose();
-    
-    toast({
-      title: 'Reply selected',
-      status: 'success',
-      duration: 2000,
-      isClosable: true,
-    });
+    try {
+      onSelectReply(suggestion.text);
+      onClose();
+      
+      toast({
+        title: 'Reply selected',
+        status: 'success',
+        duration: 2000,
+        isClosable: true,
+      });
+    } catch (error) {
+      console.error('Error selecting reply:', error);
+      toast({
+        title: 'Error',
+        description: 'Failed to select reply',
+        status: 'error',
+        duration: 3000,
+        isClosable: true,
+      });
+    }
+  };
+
+  const handleRetry = () => {
+    setRetryCount(0); // Reset retry count for manual retry
+    fetchSuggestions();
   };
 
   return (
@@ -133,7 +233,7 @@ const AutoReplyComposer = ({
         <Box flexShrink={0}>
           <Flex p={4} borderBottom="1px" borderColor="gray.700" justify="space-between" align="center">
             <Text fontSize="lg" fontWeight="semibold" color="white">
-              {message.is_improvement ? 'AI Message Improvements' : 'AI Reply Suggestions'}
+              {message.is_improvement ? 'Improve Message' : 'Reply Suggestions'}
             </Text>
             <IconButton
               icon={<CloseIcon />}
@@ -150,7 +250,7 @@ const AutoReplyComposer = ({
           <Box p={4} borderBottom="1px" borderColor="gray.700" bg="gray.750">
             <Flex align="center" gap={2} mb={2}>
               <Text fontSize="sm" color="gray.400">
-                {message.is_improvement ? 'Improving:' : 'Replying to:'}
+                {message.is_improvement ? 'Original:' : 'Replying to:'}
               </Text>
               {!message.draft && (
                 <Text fontSize="sm" color="blue.300">
@@ -192,6 +292,7 @@ const AutoReplyComposer = ({
                   borderColor="gray.600"
                   color="white"
                   _hover={{ borderColor: 'gray.500' }}
+                  isDisabled={isLoading}
                 >
                   {TONE_OPTIONS.map(option => (
                     <option key={option.value} value={option.value}>
@@ -213,6 +314,7 @@ const AutoReplyComposer = ({
                   borderColor="gray.600"
                   color="white"
                   _hover={{ borderColor: 'gray.500' }}
+                  isDisabled={isLoading}
                 >
                   {LENGTH_OPTIONS.map(option => (
                     <option key={option.value} value={option.value}>
@@ -229,8 +331,9 @@ const AutoReplyComposer = ({
               width="full"
               colorScheme="blue"
               loadingText="Generating..."
+              isDisabled={isLoading}
             >
-              {message.is_improvement ? 'Generate Improvements' : 'Generate Suggestions'}
+              Generate
             </Button>
           </Box>
         </Box>
@@ -258,25 +361,65 @@ const AutoReplyComposer = ({
         >
           <Box p={4} pb={8}> {/* Added bottom padding */}
             {error && (
-              <Alert status="error" mb={4} borderRadius="md">
+              <Alert 
+                status={
+                  errorType === ERROR_TYPES.NETWORK || errorType === ERROR_TYPES.SERVER
+                    ? 'warning'
+                    : errorType === ERROR_TYPES.TOKEN
+                    ? 'error'
+                    : 'error'
+                }
+                mb={4} 
+                borderRadius="md"
+                variant="left-accent"
+              >
                 <AlertIcon />
                 <Box flex="1">
-                  <AlertTitle>Error</AlertTitle>
+                  <AlertTitle>
+                    {errorType === ERROR_TYPES.NETWORK
+                      ? 'Connection Error'
+                      : errorType === ERROR_TYPES.TOKEN
+                      ? 'Authentication Error'
+                      : errorType === ERROR_TYPES.RATE_LIMIT
+                      ? 'Rate Limited'
+                      : 'Error'}
+                  </AlertTitle>
                   <AlertDescription display="block">
                     {error}
+                    {retryCount > 0 && retryCount < MAX_RETRIES && (
+                      <Text mt={1} fontSize="sm">
+                        Retrying... Attempt {retryCount} of {MAX_RETRIES}
+                      </Text>
+                    )}
                   </AlertDescription>
                 </Box>
-                <IconButton
-                  icon={<RepeatIcon />}
-                  onClick={fetchSuggestions}
-                  variant="ghost"
-                  colorScheme="red"
-                  size="sm"
-                  ml={2}
-                  isLoading={isLoading}
-                  aria-label="Retry"
-                />
+                {(errorType === ERROR_TYPES.NETWORK || 
+                  errorType === ERROR_TYPES.SERVER ||
+                  errorType === ERROR_TYPES.API) && (
+                  <IconButton
+                    icon={<RepeatIcon />}
+                    onClick={handleRetry}
+                    variant="ghost"
+                    colorScheme={errorType === ERROR_TYPES.NETWORK ? 'yellow' : 'red'}
+                    size="sm"
+                    ml={2}
+                    isLoading={isLoading}
+                    aria-label="Retry"
+                  />
+                )}
               </Alert>
+            )}
+
+            {isLoading && !error && (
+              <Flex direction="column" align="center" justify="center" py={8}>
+                <Spinner size="xl" color="blue.400" thickness="4px" speed="0.65s" mb={4} />
+                <Text color="gray.400">Generating AI suggestions...</Text>
+                {retryCount > 0 && (
+                  <Text color="gray.500" fontSize="sm" mt={2}>
+                    Retry attempt {retryCount} of {MAX_RETRIES}
+                  </Text>
+                )}
+              </Flex>
             )}
 
             {suggestions.length > 0 ? (
@@ -292,6 +435,8 @@ const AutoReplyComposer = ({
                     cursor="pointer"
                     onClick={() => handleSelectReply(suggestion)}
                     bg="gray.750"
+                    role="button"
+                    aria-label={`Select suggestion ${index + 1}`}
                   >
                     <Flex justify="space-between" align="center" mb={2}>
                       <Flex gap={2}>
@@ -336,7 +481,7 @@ const AutoReplyComposer = ({
               </VStack>
             ) : !isLoading && !error && (
               <Text textAlign="center" color="gray.400" py={8}>
-                Click "{message.is_improvement ? 'Generate Improvements' : 'Generate Suggestions'}" to get AI-powered {message.is_improvement ? 'message improvements' : 'reply suggestions'}
+                Click "Generate" to get AI-powered suggestions
               </Text>
             )}
           </Box>

@@ -38,15 +38,29 @@ class User(UserMixin):
 
     @staticmethod
     def get_by_id(user_id):
+        """Get user by ID with better error handling"""
         try:
+            if not user_id:
+                print("No user ID provided")
+                return None
+                
             if isinstance(user_id, str):
-                user_id = ObjectId(user_id)
+                try:
+                    user_id = ObjectId(user_id)
+                except Exception as e:
+                    print(f"Error converting user ID to ObjectId: {str(e)}")
+                    return None
+                    
             user_data = db.users.find_one({'_id': user_id})
             if user_data:
                 return User.from_dict(user_data)
-        except:
-            pass
-        return None
+            else:
+                print(f"No user found with ID: {user_id}")
+                return None
+                
+        except Exception as e:
+            print(f"Error in get_by_id: {str(e)}")
+            return None
 
     @staticmethod
     def get_by_email(email):

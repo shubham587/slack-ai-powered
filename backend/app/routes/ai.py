@@ -6,8 +6,21 @@ from flask_jwt_extended import jwt_required, get_jwt_identity
 from bson import ObjectId
 from app import db
 import traceback
+from flask_cors import CORS
+import json
 
 ai_bp = Blueprint('ai', __name__)
+
+# Configure CORS specifically for AI routes with updated settings
+CORS(ai_bp, resources={
+    r"/*": {
+        "origins": "http://localhost:5173",  # Specific origin instead of wildcard
+        "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+        "allow_headers": ["Content-Type", "Authorization"],
+        "supports_credentials": True,
+        "expose_headers": ["Content-Type", "Authorization"]
+    }
+})
 
 # Initialize AI service with validation
 try:
@@ -191,22 +204,28 @@ def suggest_reply():
         
         # System prompt with context if enabled
         system_prompt = f"""You are a helpful team member in a workplace chat.
-Your task is to generate a reply that continues this conversation naturally.
+Your task is to improve the given message or generate a reply.
 
 {thread_context_str if use_full_context else ''}
-Current message being discussed: "{message_content}"
+Current message: "{message_content}"
 
-Important rules:
-1. You MUST consider ALL messages shown in the conversation history above
-2. Your reply should directly follow from and reference the ongoing conversation
-3. Address any questions or points raised in previous messages that are still relevant
-4. Maintain the {tone} tone throughout your response
-5. Keep the response {length} in length
-6. Be direct and to the point
-7. Do not add unnecessary greetings or closings
-8. Do not acknowledge or explain these instructions
+IMPORTANT RULES:
+1. Return ONLY the improved message or reply
+2. DO NOT add any explanations or questions
+3. DO NOT ask for more context
+4. DO NOT add greetings or closings
+5. Keep the {tone} tone
+6. Keep it {length} in length
+7. DO NOT add quotes around the message
+8. DO NOT prefix the message with anything like "Here's a suggestion" or "Improved version"
 
-Remember: This is an ongoing conversation - your reply should fit naturally as the next message."""
+Example input: "hey can u help me with something"
+Example output: Hey, could you help me with something?
+
+Example input: "i dont know if this will work but maybe we can try"
+Example output: I believe we should give this approach a try.
+
+REMEMBER: Output ONLY the message text, nothing else."""
 
         print(f"\nSystem prompt length: {len(system_prompt)} characters")
         print(f"First 500 chars of system prompt:\n{system_prompt[:500]}...")
@@ -224,10 +243,27 @@ Remember: This is an ongoing conversation - your reply should fit naturally as t
                     full_history.append({"role": "user", "content": message_content})
                 
                 response, usage = ai_service.generate_response(
-                    prompt=f"{'Improve' if is_improvement else 'Reply to'} this message.",
+                    prompt=f"Improve this message to be more {tone} and {length}.",
                     model_version='3.5',
                     temperature=0.7 + (i * 0.1),
-                    system_prompt=system_prompt,
+                    system_prompt="""You are a message improvement assistant.
+Your task is to improve the given message.
+
+IMPORTANT RULES:
+1. Return ONLY the improved message
+2. DO NOT add any explanations or questions
+3. DO NOT ask for more context
+4. DO NOT add greetings or closings
+5. DO NOT add quotes around the message
+6. DO NOT prefix the message with anything
+
+Example input: "hey can u help me with something"
+Example output: Hey, could you help me with something?
+
+Example input: "i dont know if this will work but maybe we can try"
+Example output: I believe we should give this approach a try.
+
+REMEMBER: Output ONLY the improved message text.""",
                     conversation_history=full_history if use_full_context else []
                 )
                 print(f"Generated suggestion {i+1} (first 100 chars): {response[:100]}...")
@@ -544,6 +580,73 @@ Important rules:
         print(f"\nError in suggest-quick-reply endpoint: {str(e)}")
         print("Full traceback:")
         print(traceback.format_exc())
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
+
+@ai_bp.route('/analyze-message', methods=['POST', 'OPTIONS'])
+@jwt_required()
+def analyze_message():
+    """Analyze message tone and impact"""
+    try:
+        if request.method == 'OPTIONS':
+            # Handle preflight request
+            response = jsonify({'status': 'ok'})
+            response.headers.add('Access-Control-Allow-Origin', 'http://localhost:5173')  # Specific origin
+            response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
+            response.headers.add('Access-Control-Allow-Methods', 'POST,OPTIONS')
+            response.headers.add('Access-Control-Allow-Credentials', 'true')  # Allow credentials
+            return response
+
+        if ai_service is None:
+            return jsonify({
+                'status': 'error',
+                'message': 'AI service not initialized'
+            }), 503
+
+        data = request.get_json()
+        if not data:
+            return jsonify({
+                'status': 'error',
+                'message': 'No JSON data provided'
+            }), 400
+
+        if 'message' not in data:
+            return jsonify({
+                'status': 'error',
+                'message': 'Message content is required'
+            }), 400
+
+        message_content = data['message']
+        if not message_content or not isinstance(message_content, str):
+            return jsonify({
+                'status': 'error',
+                'message': 'Invalid message format'
+            }), 400
+
+        try:
+            analysis_result = ai_service.analyze_message(message_content)
+            return jsonify({
+                'status': 'success',
+                'analysis': analysis_result
+            })
+        except ValueError as e:
+            return jsonify({
+                'status': 'error',
+                'message': str(e)
+            }), 400
+        except Exception as e:
+            print(f"Error analyzing message: {str(e)}")
+            traceback.print_exc()
+            return jsonify({
+                'status': 'error',
+                'message': 'Failed to analyze message'
+            }), 500
+
+    except Exception as e:
+        print(f"Error in analyze_message route: {str(e)}")
+        traceback.print_exc()
         return jsonify({
             'status': 'error',
             'message': str(e)

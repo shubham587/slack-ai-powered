@@ -37,30 +37,42 @@
 - [x] Implement suggestion preview
 - [x] Add send functionality
 - [x] Add edit capability
-- [ ] Add "Suggest Reply" button to ThreadPanel
-- [ ] Implement error handling
+- [x] Add "Suggest Reply" button to ThreadPanel
+- [x] Implement error handling
 
-## Phase 3: Tone & Impact Meter (Using GPT-4)
+## Phase 3: Message Tone & Impact Analysis (Using GPT-4)
 ### Backend Implementation
-- [ ] Create /api/ai/analyze-tone endpoint
-- [ ] Add real-time processing
-- [ ] Implement response caching
-- [ ] Set up debouncing
-- [ ] Add tone classification with GPT-4
-- [ ] Implement impact scoring
-- [ ] Add suggestion generation
+- [ ] Create /api/ai/analyze-message endpoint
+- [ ] Implement real-time message analysis
+- [ ] Add tone classification (aggressive/weak/confusing)
+- [ ] Add impact scoring (high-impact/low-impact)
+- [ ] Set up response caching for performance
+- [ ] Implement debounced API calls
+- [ ] Add user feedback collection for accuracy
+- [ ] Create tone improvement suggestions
 - [ ] Add performance monitoring
 
 ### Frontend Implementation
-- [ ] Add tone indicator to MessageInput
-- [ ] Create ToneIndicator component
-- [ ] Create ToneSuggestions component
-- [ ] Create real-time feedback display
-- [ ] Add visual indicators
-- [ ] Implement improvement suggestions
-- [ ] Add tooltip system
-- [ ] Implement debounced API calls
-- [ ] Add accuracy feedback option
+- [ ] Add real-time tone indicators in MessageInput
+- [ ] Create visual indicators for different tones
+- [ ] Implement impact level visualization
+- [ ] Add hover tooltips with detailed analysis
+- [ ] Show improvement suggestions
+- [ ] Create tone adjustment recommendations
+- [ ] Add user feedback mechanism
+- [ ] Implement debounced analysis
+- [ ] Add tone preferences per channel
+
+### Success Metrics
+- [ ] Accurate identification of aggressive tone
+- [ ] Reliable detection of weak messaging
+- [ ] Clear highlighting of confusing content
+- [ ] Precise impact level assessment
+- [ ] Helpful improvement suggestions
+- [ ] Fast real-time analysis
+- [ ] Minimal false positives
+- [ ] User satisfaction with suggestions
+- [ ] Improved communication clarity
 
 ## Phase 4: Meeting Notes Generator (Start with 3.5, upgrade if needed)
 ### Backend Implementation

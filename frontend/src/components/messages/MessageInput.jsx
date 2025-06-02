@@ -17,6 +17,7 @@ import { FiSend } from 'react-icons/fi';
 import { AiOutlineRobot } from 'react-icons/ai';
 import FileUpload from './FileUpload';
 import AutoReplyComposer from '../ai/AutoReplyComposer';
+import MessageToneAnalyzer from '../ai/MessageToneAnalyzer';
 
 const MessageInput = ({ 
   onSendMessage, 
@@ -33,8 +34,11 @@ const MessageInput = ({
   const [selectedFile, setSelectedFile] = useState(null);
   const [showAiSuggestions, setShowAiSuggestions] = useState(false);
   const [replyToMessage, setReplyToMessage] = useState(null);
+  const [isTyping, setIsTyping] = useState(false);
+  const [analysis, setAnalysis] = useState(null);
   const toast = useToast();
   const fileInputRef = React.useRef(null);
+  const typingTimeoutRef = React.useRef(null);
 
   // Update message when initialMessage changes
   useEffect(() => {
@@ -48,10 +52,42 @@ const MessageInput = ({
     setShowFileUpload(false);
     setShowAiSuggestions(false);
     setReplyToMessage(null);
+    setAnalysis(null);
     if (!initialMessage) {
       setMessage('');
     }
   }, [currentChannel?.id, initialMessage]); // Only trigger when channel ID changes
+
+  const handleMessageChange = (e) => {
+    const newMessage = e.target.value;
+    setMessage(newMessage);
+    setIsTyping(true);
+
+    // Clear previous timeout
+    if (typingTimeoutRef.current) {
+      clearTimeout(typingTimeoutRef.current);
+    }
+
+    // Set new timeout
+    typingTimeoutRef.current = setTimeout(() => {
+      setIsTyping(false);
+    }, 1000);
+  };
+
+  const handleAnalysisComplete = (analysisData) => {
+    setAnalysis(analysisData);
+    
+    // Show warning for aggressive tone
+    if (analysisData.tone === 'aggressive') {
+      toast({
+        title: 'Message Tone Warning',
+        description: 'Your message may come across as aggressive. Consider revising.',
+        status: 'warning',
+        duration: 5000,
+        isClosable: true,
+      });
+    }
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -168,71 +204,118 @@ const MessageInput = ({
         </Flex>
       )}
       
-      <Flex gap={2}>
-        {showAttachment && (
+      <Flex direction="column" gap={2}>
+        <Flex gap={2}>
+          {showAttachment && (
+            <IconButton
+              icon={<AttachmentIcon />}
+              onClick={handleAttachmentClick}
+              variant="ghost"
+              colorScheme="whiteAlpha"
+              size="md"
+              {...customStyles.attachButton}
+            />
+          )}
+          
+          <Input
+            type="file"
+            ref={fileInputRef}
+            display="none"
+            onChange={handleFileChange}
+          />
+          
+          <Box flex="1" position="relative">
+            <Textarea
+              value={message}
+              onChange={handleMessageChange}
+              onKeyDown={handleKeyDown}
+              placeholder={placeholder}
+              resize="none"
+              rows={1}
+              bg="transparent"
+              border="none"
+              _focus={{ border: 'none', boxShadow: 'none' }}
+              pr="100px"
+              {...customStyles.input}
+            />
+            
+            {/* Tone Analysis */}
+            <Box 
+              position="absolute" 
+              bottom={2} 
+              right={2}
+              zIndex={2}
+              bg="gray.800"
+              borderRadius="md"
+              p={1}
+            >
+              <MessageToneAnalyzer
+                message={message}
+                channelType={currentChannel?.type}
+                onAnalysisComplete={handleAnalysisComplete}
+                isTyping={isTyping}
+              />
+            </Box>
+          </Box>
+          
           <IconButton
-            icon={<AttachmentIcon />}
-            onClick={handleAttachmentClick}
+            icon={<AiOutlineRobot />}
+            onClick={handleAiClick}
+            isDisabled={!message.trim()}
             variant="ghost"
             colorScheme="whiteAlpha"
             size="md"
-            {...customStyles.attachButton}
+            {...customStyles.aiButton}
           />
-        )}
-        
-        <Input
-          type="file"
-          ref={fileInputRef}
-          display="none"
-          onChange={handleFileChange}
-        />
-        
-        <Textarea
-          value={message}
-          onChange={(e) => setMessage(e.target.value)}
-          onKeyDown={handleKeyDown}
-          placeholder={placeholder}
-          resize="none"
-          rows={1}
-          bg="transparent"
-          border="none"
-          _focus={{ border: 'none', boxShadow: 'none' }}
-          flex="1"
-          {...customStyles.input}
-        />
-        
-        <IconButton
-          icon={<AiOutlineRobot />}
-          onClick={handleAiClick}
-          isDisabled={!message.trim()}
-          variant="ghost"
-          colorScheme="whiteAlpha"
-          size="md"
-          {...customStyles.aiButton}
-        />
-        
-        <Button
-          onClick={handleSend}
-          isDisabled={!message.trim() && !selectedFile}
-          colorScheme="blue"
-          {...customStyles.sendButton}
-        >
-          Send
-        </Button>
-        
-        {onCancel && (
+          
           <Button
-            onClick={() => {
-              setMessage('');  // Clear the message
-              setSelectedFile(null);  // Clear any selected file
-              setShowFileUpload(false);  // Hide file upload if shown
-              setShowAiSuggestions(false);  // Hide AI suggestions if shown
-              onCancel();  // Call the parent's onCancel handler
-            }}
-            {...customStyles.cancelButton}
+            onClick={handleSend}
+            isDisabled={!message.trim() && !selectedFile}
+            colorScheme="blue"
+            {...customStyles.sendButton}
           >
-            Cancel
+            Send
           </Button>
+          
+          {onCancel && (
+            <Button
+              onClick={() => {
+                setMessage('');  // Clear the message
+                setSelectedFile(null);  // Clear any selected file
+                setShowFileUpload(false);  // Hide file upload if shown
+                setShowAiSuggestions(false);  // Hide AI suggestions if shown
+                onCancel();  // Call the parent's onCancel handler
+              }}
+              {...customStyles.cancelButton}
+            >
+              Cancel
+            </Button>
+          )}
+        </Flex>
+
+        {/* Analysis Improvements */}
+        {analysis && analysis.improvements.length > 0 && (
+          <Collapse in={!isTyping}>
+            <Box
+              mt={2}
+              p={2}
+              bg="gray.700"
+              borderRadius="md"
+              borderLeft="4px solid"
+              borderLeftColor="blue.400"
+            >
+              <Text fontSize="sm" color="gray.300" mb={1}>
+                Suggested Improvements:
+              </Text>
+              <VStack align="stretch" spacing={1}>
+                {analysis.improvements.map((improvement, index) => (
+                  <Text key={index} fontSize="sm" color="gray.100">
+                    • {improvement}
+                  </Text>
+                ))}
+              </VStack>
+            </Box>
+          </Collapse>
         )}
       </Flex>
 

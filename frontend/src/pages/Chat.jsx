@@ -1,7 +1,8 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { selectUser } from '../store/slices/authSlice';
-import { initializeSocket, getSocket } from '../socket';
+import { selectChannels } from '../store/slices/channelsSlice';
+import { initializeSocket, getSocket, joinChannel, leaveChannel, disconnectSocket } from '../socket';
 import {
   Input,
   Button,
@@ -34,6 +35,7 @@ import {
   MenuItem,
   MenuDivider,
   VStack,
+  Heading,
 } from '@chakra-ui/react';
 import {
   AddIcon,
@@ -61,17 +63,60 @@ import { AiFillPushpin, AiOutlinePushpin, AiOutlineRobot } from 'react-icons/ai'
 import ThreadPanel from '../components/messages/ThreadPanel';
 import AutoReplyComposer from '../components/ai/AutoReplyComposer';
 import LogoutButton from '../components/common/LogoutButton';
+import { FaHashtag } from 'react-icons/fa';
+import { BsChatDots } from 'react-icons/bs';
+import axios from 'axios';
+import { useNavigate } from 'react-router-dom';
+import { selectChannelMessages, setMessages, setLoading, setError } from '../store/slices/messagesSlice';
+import { createSelector } from 'reselect';
+
+const WelcomeView = () => (
+  <Flex
+    direction="column"
+    align="center"
+    justify="center"
+    flex={1}
+    p={8}
+    textAlign="center"
+    color="gray.400"
+  >
+    <VStack spacing={6}>
+      <Icon as={BsChatDots} boxSize={12} />
+      <VStack spacing={2}>
+        <Heading size="lg" color="white">
+          Welcome to Slack AI-Powered
+        </Heading>
+        <Text fontSize="lg">
+          Select a channel or direct message to start chatting
+        </Text>
+      </VStack>
+      <HStack spacing={6} mt={4}>
+        <VStack>
+          <Icon as={FaHashtag} boxSize={6} />
+          <Text>Join a channel</Text>
+        </VStack>
+        <VStack>
+          <Icon as={ChatIcon} boxSize={6} />
+          <Text>Start a conversation</Text>
+        </VStack>
+      </HStack>
+    </VStack>
+  </Flex>
+);
 
 const Chat = () => {
   const dispatch = useDispatch();
   const user = useSelector(selectUser);
-  const toast = useToast();
-  const channels = useSelector(state => state.channels.channels);
+  const channels = useSelector(selectChannels);
+  
+  // State declarations
   const [currentChannel, setCurrentChannel] = useState(null);
-  const [messages, setMessages] = useState([]);
+  const [selectedDmId, setSelectedDmId] = useState(null);
   const [directMessages, setDirectMessages] = useState([]);
+  const [filteredChannels, setFilteredChannels] = useState([]);
+  const [filteredDirectMessages, setFilteredDirectMessages] = useState([]);
+  const [filteredMessages, setFilteredMessages] = useState([]);
   const [isDirectMessageOpen, setIsDirectMessageOpen] = useState(false);
-  const [newMessage, setNewMessage] = useState('');
   const [isTyping, setIsTyping] = useState(false);
   const [typingUsers, setTypingUsers] = useState(new Set());
   const [showNewChannelModal, setShowNewChannelModal] = useState(false);
@@ -80,161 +125,34 @@ const Chat = () => {
   const [editingMessage, setEditingMessage] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const [showThreadPanel, setShowThreadPanel] = useState(false);
-  const messagesEndRef = useRef(null);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
-  const [filteredChannels, setFilteredChannels] = useState([]);
   const [pinnedMessages, setPinnedMessages] = useState([]);
   const [showSidebar, setShowSidebar] = useState(true);
   const [activeThread, setActiveThread] = useState(null);
   const [showAIComposer, setShowAIComposer] = useState(false);
   const [selectedMessage, setSelectedMessage] = useState(null);
   const [messageSearchTerm, setMessageSearchTerm] = useState('');
-  const [filteredMessages, setFilteredMessages] = useState([]);
   const [userSearchTerm, setUserSearchTerm] = useState('');
-  const [filteredDirectMessages, setFilteredDirectMessages] = useState([]);
 
-  const scrollToBottom = () => {
-    if (messagesEndRef.current) {
-      messagesEndRef.current.scrollIntoView({
-        behavior: "smooth",
-        block: "end",
-      });
-    }
-  };
+  const messagesEndRef = useRef(null);
+  const toast = useToast();
+  const navigate = useNavigate();
 
-  useEffect(() => {
-    const initializeData = async () => {
-      try {
-        setIsLoading(true);
-        await loadChannels();
-        await loadRecentDirectMessages();
-      } catch (error) {
-        console.error('Error initializing data:', error);
-      } finally {
-        setIsLoading(false);
-      }
-    };
+  // Memoized selector for messages
+  const selectMessagesForChannel = useMemo(
+    () => createSelector(
+      [(state) => state.messages.messages, () => currentChannel?.id],
+      (messages, channelId) => channelId ? messages[channelId] || [] : []
+    ),
+    [currentChannel?.id]
+  );
 
-    initializeData();
-    
-    // Initialize socket with token
-    const token = localStorage.getItem('token');
-    if (token) {
-      initializeSocket(token);
-    }
+  // Use memoized selector
+  const messages = useSelector(selectMessagesForChannel);
 
-    // Get socket instance
-    const socket = getSocket();
-    if (!socket) {
-      console.error('Socket not initialized');
-      return;
-    }
-
-    // Join user's room for personal notifications after a short delay to ensure socket is connected
-    const userId = user?.id;
-    if (userId) {
-      setTimeout(() => {
-        socket.emit('join_user_room', { user_id: userId });
-      }, 1000);
-    }
-
-    // Set up socket event listeners
-    const handleNewMessage = (data) => {
-      console.log('Received message:', data);
-      const messageChannelId = data.channelId || data.channel_id;
-      if (messageChannelId === currentChannel?.id) {
-        const newMessage = {
-          ...data.message || data,
-          reply_count: (data.message || data).reply_count || 0,
-          is_direct: currentChannel.is_direct || false
-        };
-        
-        setMessages(prev => [...prev, newMessage]);
-        setTimeout(() => {
-          scrollToBottom();
-        }, 100);
-        
-        // Update last message in directMessages list if it's a DM
-        if (currentChannel.is_direct) {
-          setDirectMessages(prev => 
-            prev.map(dm => 
-              dm.channel_id === messageChannelId 
-                ? { ...dm, last_message: newMessage }
-                : dm
-            )
-          );
-        }
-      }
-    };
-
-    const handleMessageUpdate = (data) => {
-      const updatedMessage = data.message || data;
-      setMessages(prev => prev.map(msg => 
-        msg.id === updatedMessage.id ? {
-          ...updatedMessage,
-          reply_count: updatedMessage.reply_count || 0,
-          is_direct: currentChannel?.is_direct || false
-        } : msg
-      ));
-    };
-
-    socket.on('new_message', handleNewMessage);
-    socket.on('message_updated', handleMessageUpdate);
-
-    return () => {
-      socket.off('new_message', handleNewMessage);
-      socket.off('message_updated', handleMessageUpdate);
-    };
-  }, [user?.id, currentChannel?.id]);
-
-  useEffect(() => {
-    if (currentChannel?.id) {
-      joinChannel(currentChannel.id);
-      loadMessages(currentChannel.id);
-    } else {
-      setMessages([]); // Clear messages when no channel is selected
-    }
-  }, [currentChannel]); // Only trigger when channel changes
-
-  useEffect(() => {
-    if (messages.length > 0) {
-      scrollToBottom();
-    }
-  }, [messages]);
-
-  useEffect(() => {
-    if (currentChannel?.id) {
-      scrollToBottom();
-    }
-  }, [currentChannel]);
-
-  useEffect(() => {
-    // Filter channels based on search term
-    const channelsArray = Object.values(channels).filter(channel => !channel.is_direct); // Exclude DMs
-    if (searchTerm.trim() === '') {
-      setFilteredChannels(channelsArray);
-    } else {
-      const filtered = channelsArray.filter(channel => 
-        channel.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        channel.description?.toLowerCase().includes(searchTerm.toLowerCase())
-      );
-      setFilteredChannels(filtered);
-    }
-  }, [searchTerm, channels]);
-
-  useEffect(() => {
-    if (currentChannel?.pinned_messages?.length > 0 && messages.length > 0) {
-      const pinned = messages.filter(msg => 
-        currentChannel.pinned_messages.includes(msg.id)
-      );
-      setPinnedMessages(pinned);
-    } else {
-      setPinnedMessages([]);
-    }
-  }, [currentChannel?.pinned_messages, messages]);
-
+  // Update filtered messages when messages or search term changes
   useEffect(() => {
     if (messageSearchTerm.trim() === '') {
       setFilteredMessages(messages);
@@ -246,47 +164,72 @@ const Chat = () => {
       );
       setFilteredMessages(filtered);
     }
-  }, [messageSearchTerm, messages]);
+  }, [messages, messageSearchTerm]);
+
+  // Memoized pinned messages
+  const currentPinnedMessages = useMemo(() => {
+    if (currentChannel?.pinned_messages?.length > 0 && messages.length > 0) {
+      return messages.filter(msg => 
+        currentChannel.pinned_messages.includes(msg.id)
+      );
+    }
+    return [];
+  }, [currentChannel?.pinned_messages, messages]);
 
   useEffect(() => {
-    if (userSearchTerm.trim() === '') {
-      setFilteredDirectMessages(directMessages);
-    } else {
-      const searchTermLower = userSearchTerm.toLowerCase();
-      const filtered = directMessages.filter(dm => 
-        dm.user.username.toLowerCase().includes(searchTermLower) ||
-        dm.user.display_name?.toLowerCase().includes(searchTermLower)
-      );
-      setFilteredDirectMessages(filtered);
-    }
-  }, [userSearchTerm, directMessages]);
+    setPinnedMessages(currentPinnedMessages);
+  }, [currentPinnedMessages]);
 
-  const loadChannels = async () => {
-    try {
-      setIsLoading(true);
-      const result = await dispatch(fetchChannels()).unwrap();
-      
-      // If we have channels but no current channel selected, select the first one
-      const channelsArray = Object.values(result);
-      if (channelsArray.length > 0 && !currentChannel) {
-        console.log('Setting initial channel:', channelsArray[0]);
-        handleChannelSelect(channelsArray[0]);
-      }
-    } catch (error) {
-      console.error('Error loading channels:', error);
-    } finally {
-      setIsLoading(false);
+  // Memoized filtered channels
+  const currentFilteredChannels = useMemo(() => {
+    const channelsArray = channels.filter(channel => !channel.is_direct);
+    if (!searchTerm.trim()) {
+      return channelsArray;
     }
-  };
+    const searchTermLower = searchTerm.toLowerCase();
+    return channelsArray.filter(channel => 
+      channel.name.toLowerCase().includes(searchTermLower) ||
+      channel.description?.toLowerCase().includes(searchTermLower)
+    );
+  }, [channels, searchTerm]);
 
-  const loadMessages = async (channelId) => {
+  useEffect(() => {
+    setFilteredChannels(currentFilteredChannels);
+  }, [currentFilteredChannels]);
+
+  // Memoized filtered direct messages
+  const currentFilteredDirectMessages = useMemo(() => {
+    if (!userSearchTerm.trim()) {
+      return directMessages;
+    }
+    const searchTermLower = userSearchTerm.toLowerCase();
+    return directMessages.filter(dm => 
+      dm.user.username.toLowerCase().includes(searchTermLower) ||
+      dm.user.display_name?.toLowerCase().includes(searchTermLower)
+    );
+  }, [directMessages, userSearchTerm]);
+
+  useEffect(() => {
+    setFilteredDirectMessages(currentFilteredDirectMessages);
+  }, [currentFilteredDirectMessages]);
+
+  const scrollToBottom = useCallback(() => {
+    if (messagesEndRef.current) {
+      messagesEndRef.current.scrollIntoView({
+        behavior: "smooth",
+        block: "end",
+      });
+    }
+  }, []);
+
+  const loadMessages = useCallback(async (channelId) => {
     if (!channelId) {
       console.error('No channel ID provided for loading messages');
       return;
     }
     
-    console.log('Loading messages for channel:', channelId);
     try {
+      dispatch(setLoading(true));
       const token = localStorage.getItem('token');
       if (!token) {
         throw new Error('No authentication token found');
@@ -304,15 +247,13 @@ const Chat = () => {
       }
 
       const data = await response.json();
-      console.log('Received messages:', data);
       
       if (!Array.isArray(data)) {
         console.error('Received non-array messages data:', data);
-        setMessages([]);
+        dispatch(setMessages({ channelId, messages: [] }));
         return;
       }
 
-      // Sort messages by timestamp in ascending order and ensure reply_count is set
       const sortedMessages = data
         .sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
         .map(msg => ({
@@ -321,15 +262,333 @@ const Chat = () => {
           is_direct: currentChannel?.is_direct || false
         }));
 
-      setMessages(sortedMessages);
-      
-      // Scroll to bottom after messages are loaded
-      setTimeout(() => {
-        scrollToBottom();
-      }, 100);
+      dispatch(setMessages({ channelId, messages: sortedMessages }));
+      setTimeout(scrollToBottom, 100);
     } catch (error) {
       console.error('Error loading messages:', error);
-      setMessages([]);
+      dispatch(setError(error.message));
+      dispatch(setMessages({ channelId, messages: [] }));
+    } finally {
+      dispatch(setLoading(false));
+    }
+  }, [dispatch, currentChannel?.is_direct, scrollToBottom]);
+
+  // Selector with safe null check
+  const isMessagesLoading = useSelector(state => state.messages.loading);
+
+  // Update filtered data when search terms change
+  useEffect(() => {
+    const channelsArray = Object.values(channels).filter(channel => !channel.is_direct);
+    if (searchTerm.trim() === '') {
+      setFilteredChannels(channelsArray);
+    } else {
+      const filtered = channelsArray.filter(channel => 
+        channel.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        channel.description?.toLowerCase().includes(searchTerm.toLowerCase())
+      );
+      setFilteredChannels(filtered);
+    }
+  }, [channels, searchTerm]);
+
+  useEffect(() => {
+    if (userSearchTerm.trim() === '') {
+      setFilteredDirectMessages(directMessages);
+    } else {
+      const searchTermLower = userSearchTerm.toLowerCase();
+      const filtered = directMessages.filter(dm => 
+        dm.user.username.toLowerCase().includes(searchTermLower) ||
+        dm.user.display_name?.toLowerCase().includes(searchTermLower)
+      );
+      setFilteredDirectMessages(filtered);
+    }
+  }, [directMessages, userSearchTerm]);
+
+  // Update pinned messages
+  useEffect(() => {
+    if (currentChannel?.pinned_messages?.length > 0 && messages.length > 0) {
+      const pinned = messages.filter(msg => 
+        currentChannel.pinned_messages.includes(msg.id)
+      );
+      setPinnedMessages(pinned);
+    } else {
+      setPinnedMessages([]);
+    }
+  }, [currentChannel?.pinned_messages, messages]);
+
+  const loadRecentDirectMessages = useCallback(async () => {
+    try {
+      if (!user || !user.id) {
+        console.error('User not authenticated');
+        return;
+      }
+
+      const token = localStorage.getItem('token');
+      if (!token) {
+        throw new Error('No authentication token found');
+      }
+
+      const response = await axios.get(
+        `${import.meta.env.VITE_API_URL || 'http://localhost:5001'}/api/messages/recent-chats`,
+        {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          }
+        }
+      );
+
+      if (!Array.isArray(response.data)) {
+        console.error('Received non-array data:', response.data);
+        setDirectMessages([]);
+        setFilteredDirectMessages([]);
+        return;
+      }
+
+      const transformedData = response.data.map(chat => ({
+        user: {
+          id: chat.user.id,
+          username: chat.user.username,
+          display_name: chat.user.display_name || chat.user.username,
+          avatar_url: chat.user.avatar_url
+        },
+        last_message: chat.last_message,
+        channel_id: chat.channel_id
+      }));
+
+      setDirectMessages(transformedData);
+      setFilteredDirectMessages(transformedData);
+    } catch (error) {
+      console.error('Error loading recent direct messages:', error);
+      toast({
+        title: 'Error loading direct messages',
+        description: error.response?.data?.error || error.message,
+        status: 'error',
+        duration: 3000,
+        isClosable: true,
+      });
+      setDirectMessages([]);
+      setFilteredDirectMessages([]);
+    }
+  }, [user, toast]);
+
+  // Initialize socket and data
+  useEffect(() => {
+    let mounted = true;
+
+    const initializeData = async () => {
+      if (!mounted) return;
+
+      try {
+        setIsLoading(true);
+        await loadChannels();
+        await loadRecentDirectMessages();
+      } catch (error) {
+        console.error('Error initializing data:', error);
+      } finally {
+        if (mounted) {
+        setIsLoading(false);
+        }
+      }
+    };
+
+    const token = localStorage.getItem('token');
+    if (token) {
+      initializeSocket(token);
+    }
+
+    const socket = getSocket();
+    if (!socket) {
+      console.error('Socket not initialized');
+      return;
+    }
+
+    const userId = user?.id;
+    if (userId) {
+        socket.emit('join_user_room', { user_id: userId });
+    }
+
+    initializeData();
+
+    return () => {
+      mounted = false;
+      disconnectSocket();
+    };
+  }, [user?.id]);
+
+  // Handle channel selection
+  const handleChannelSelect = useCallback((channel) => {
+    console.log('Selecting channel:', channel);
+    
+    // Leave current channel if any
+    if (currentChannel?.id) {
+      leaveChannel(currentChannel.id);
+    }
+    
+    // Always close thread when switching channels
+    setShowThreadPanel(false);
+    setActiveThread(null);
+    setShowAIComposer(false);
+    setSelectedMessage(null);
+    
+    setCurrentChannel(channel);
+    setSelectedDmId(null); // Clear DM selection when selecting a channel
+    
+    if (channel?.id) {
+      // Join new channel
+      joinChannel(channel.id);
+      loadMessages(channel.id);
+    }
+  }, [currentChannel?.id, loadMessages]);
+
+  // Load messages when channel changes
+  useEffect(() => {
+    if (currentChannel?.id) {
+      loadMessages(currentChannel.id);
+    } else {
+      dispatch(setMessages({ channelId: null, messages: [] }));
+    }
+  }, [currentChannel?.id, loadMessages, dispatch]);
+
+  // Scroll to bottom when messages change
+  useEffect(() => {
+    if (messages.length > 0) {
+      scrollToBottom();
+    }
+  }, [messages.length, scrollToBottom]);
+
+  // Message search effect
+  useEffect(() => {
+    if (messageSearchTerm.trim() === '') {
+      setFilteredMessages(messages);
+    } else {
+      const searchTermLower = messageSearchTerm.toLowerCase();
+      const filtered = messages.filter(message => 
+        message.content?.toLowerCase().includes(searchTermLower) ||
+        message.username?.toLowerCase().includes(searchTermLower)
+      );
+      setFilteredMessages(filtered);
+    }
+  }, [messageSearchTerm, messages]);
+
+  // User search effect
+  useEffect(() => {
+    if (userSearchTerm.trim() === '') {
+      setFilteredDirectMessages(directMessages);
+    } else {
+      const searchTermLower = userSearchTerm.toLowerCase();
+      const filtered = directMessages.filter(dm => 
+        dm.user.username.toLowerCase().includes(searchTermLower) ||
+        dm.user.display_name?.toLowerCase().includes(searchTermLower)
+      );
+      setFilteredDirectMessages(filtered);
+    }
+  }, [directMessages, userSearchTerm]);
+
+  // Memoize handleDirectMessageSelect
+  const handleDirectMessageSelect = useCallback(async (user, existingChannelId = null) => {
+    try {
+      const token = localStorage.getItem('token');
+      let channelId = existingChannelId;
+      let messages = [];
+
+      // Leave current channel if any
+      if (currentChannel?.id) {
+        leaveChannel(currentChannel.id);
+      }
+
+    if (!channelId) {
+        // If no existing channel ID, create/get one
+        const response = await fetch(
+          `${import.meta.env.VITE_API_URL || 'http://localhost:5001'}/api/messages/direct/${user.id}`,
+          {
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              'Content-Type': 'application/json'
+            }
+          }
+        );
+
+        if (!response.ok) {
+          throw new Error('Failed to load direct messages');
+        }
+
+        const data = await response.json();
+        channelId = data.channel_id;
+        messages = data.messages || [];
+      } else {
+        // If we have a channel ID, just load messages for that channel
+        const response = await fetch(
+          `${import.meta.env.VITE_API_URL || 'http://localhost:5001'}/api/messages/channel/${channelId}`,
+          {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+          }
+        );
+
+      if (!response.ok) {
+          throw new Error('Failed to load messages');
+        }
+
+        messages = await response.json();
+      }
+      
+      // Always close thread when switching to DM
+      setShowThreadPanel(false);
+      setActiveThread(null);
+      setShowAIComposer(false);
+      setSelectedMessage(null);
+      
+      // Create a virtual channel for direct messages
+      const dmChannel = {
+        id: channelId,
+        name: user.display_name || user.username,
+        is_direct: true,
+        members: [user.id],
+        avatar_url: user.avatar_url,
+        display_name: user.display_name || user.username,
+        description: `Direct message with ${user.display_name || user.username}`,
+        type: 'direct'
+      };
+
+      setCurrentChannel(dmChannel);
+      setSelectedDmId(channelId);
+      
+      // Ensure messages have the is_direct flag
+      const messagesWithDmFlag = messages.map(msg => ({
+        ...msg,
+        is_direct: true,
+        channel_id: channelId
+      }));
+      dispatch(setMessages({ channelId, messages: messagesWithDmFlag }));
+      
+      setIsDirectMessageOpen(false);
+      
+      // Join the DM channel
+      joinChannel(channelId);
+
+        scrollToBottom();
+    } catch (error) {
+      console.error('Error loading direct messages:', error);
+      toast({
+        title: 'Error',
+        description: 'Failed to load direct messages',
+        status: 'error',
+        duration: 3000,
+        isClosable: true,
+      });
+    }
+  }, [currentChannel?.id, dispatch, scrollToBottom]);
+
+  const loadChannels = async () => {
+    try {
+      setIsLoading(true);
+      await dispatch(fetchChannels()).unwrap();
+      setIsLoading(false);
+    } catch (error) {
+      console.error('Error loading channels:', error);
+      setIsLoading(false);
     }
   };
 
@@ -358,7 +617,6 @@ const Chat = () => {
         method: 'POST',
         headers: {
             'Authorization': `Bearer ${token}`
-            // Don't set Content-Type for FormData, browser will set it automatically with boundary
           },
           body: formData
         });
@@ -369,11 +627,11 @@ const Chat = () => {
           headers: {
             'Authorization': `Bearer ${token}`,
             'Content-Type': 'application/json'
-        },
+          },
           body: JSON.stringify({
             content: messageData.content
           })
-      });
+        });
       }
       
       if (!response.ok) {
@@ -383,12 +641,30 @@ const Chat = () => {
       
       const data = await response.json();
       
-      // Emit socket event for real-time updates
-      const socket = getSocket();
-      socket.emit('new_message', {
-        channelId: currentChannel.id,
-        message: data
-      });
+      // Immediately update local state
+      const newMessage = {
+        ...data,
+        reply_count: data.reply_count || 0,
+        is_direct: currentChannel.is_direct || false
+      };
+      
+      dispatch(setMessages({ channelId: currentChannel.id, messages: [...messages, newMessage] }));
+      
+      // Scroll to bottom immediately
+      setTimeout(() => {
+        scrollToBottom();
+      }, 100);
+      
+      // Update last message in directMessages list if it's a DM
+      if (currentChannel.is_direct) {
+        setDirectMessages(prev => 
+          prev.map(dm => 
+            dm.channel_id === currentChannel.id 
+              ? { ...dm, last_message: newMessage }
+              : dm
+          )
+        );
+      }
       
       return data;
     } catch (error) {
@@ -411,7 +687,7 @@ const Chat = () => {
       if (!response.ok) {
         if (response.status === 404) {
           // Message no longer exists, update UI state
-          setMessages(prev => prev.filter(msg => msg.id !== messageId));
+          dispatch(setMessages({ channelId: currentChannel?.id, messages: messages.filter(msg => msg.id !== messageId) }));
           toast({
             title: 'Message not found',
             description: 'This message may have been deleted',
@@ -425,9 +701,9 @@ const Chat = () => {
       } else {
         const data = await response.json();
         // Update the message in the UI
-        setMessages(prev => prev.map(msg => 
+        dispatch(setMessages({ channelId: currentChannel?.id, messages: messages.map(msg => 
           msg.id === messageId ? { ...msg, content: content } : msg
-        ));
+        ) }));
       }
       setEditingMessage(null);
     } catch (error) {
@@ -454,7 +730,7 @@ const Chat = () => {
       if (!response.ok) {
         if (response.status === 404) {
           // Message already deleted, just update UI
-          setMessages(prev => prev.filter(msg => msg.id !== messageId));
+          dispatch(setMessages({ channelId: currentChannel?.id, messages: messages.filter(msg => msg.id !== messageId) }));
           toast({
             title: 'Message already deleted',
             description: 'The message was already removed',
@@ -467,7 +743,7 @@ const Chat = () => {
         }
       } else {
         // Update UI to remove the message
-        setMessages(prev => prev.filter(msg => msg.id !== messageId));
+        dispatch(setMessages({ channelId: currentChannel?.id, messages: messages.filter(msg => msg.id !== messageId) }));
         toast({
           title: 'Message deleted',
           status: 'success',
@@ -575,114 +851,6 @@ const Chat = () => {
     }
   };
 
-  // Channel selection handler
-  const handleChannelSelect = (channel) => {
-    console.log('Selecting channel:', channel);
-    
-    // Always close thread when switching channels
-    setShowThreadPanel(false);
-    setActiveThread(null);
-    setShowAIComposer(false);
-    setSelectedMessage(null);
-    
-    setCurrentChannel(channel);
-    if (channel?.id) {
-      joinChannel(channel.id);
-      loadMessages(channel.id);
-    }
-  };
-
-  const loadRecentDirectMessages = async () => {
-    try {
-      const token = localStorage.getItem('token');
-      if (!token) {
-        throw new Error('No authentication token found');
-      }
-
-      const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5001'}/api/messages/recent-chats`, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to load recent chats');
-      }
-
-      const data = await response.json();
-      setDirectMessages(data);
-    } catch (error) {
-      console.error('Error loading recent direct messages:', error);
-    }
-  };
-
-  const handleDirectMessageSelect = async (user) => {
-    try {
-      const token = localStorage.getItem('token');
-      const response = await fetch(
-        `${import.meta.env.VITE_API_URL || 'http://localhost:5001'}/api/messages/direct/${user.id}`,
-        {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          }
-        }
-      );
-
-      if (!response.ok) {
-        throw new Error('Failed to load direct messages');
-      }
-
-      const data = await response.json();
-      
-      // Always close thread when switching to DM
-      setShowThreadPanel(false);
-      setActiveThread(null);
-      setShowAIComposer(false);
-      setSelectedMessage(null);
-      
-      // Create a virtual channel for direct messages
-      const dmChannel = {
-        id: data.channel_id,
-        name: user.display_name || user.username,
-        is_direct: true,
-        members: [user.id],
-        avatar_url: user.avatar_url,
-        display_name: user.display_name || user.username,
-        description: `Direct message with ${user.display_name || user.username}`
-      };
-
-      setCurrentChannel(dmChannel);
-      
-      // Ensure messages have the is_direct flag
-      const messagesWithDmFlag = (data.messages || []).map(msg => ({
-        ...msg,
-        is_direct: true
-      }));
-      setMessages(messagesWithDmFlag);
-      
-      setIsDirectMessageOpen(false);
-      
-      // Join the DM channel socket room
-      const socket = getSocket();
-      if (socket) {
-        socket.emit('join', { channel: data.channel_id });
-      }
-
-      scrollToBottom();
-    } catch (error) {
-      console.error('Error loading direct messages:', error);
-      toast({
-        title: 'Error',
-        description: 'Failed to load direct messages',
-        status: 'error',
-        duration: 3000,
-        isClosable: true,
-      });
-    }
-  };
-
   // Add socket event listener for DM updates
   useEffect(() => {
     const socket = getSocket();
@@ -691,7 +859,7 @@ const Chat = () => {
     const handleDirectMessage = (data) => {
       // Update messages if we're in the same DM channel
       if (currentChannel?.is_direct && data.channel_id === currentChannel.id) {
-        setMessages(prev => [...prev, data]);
+        dispatch(setMessages({ channelId: currentChannel.id, messages: [...messages, data] }));
         scrollToBottom();
       }
 
@@ -711,7 +879,7 @@ const Chat = () => {
     return () => {
       socket.off('new_direct_message', handleDirectMessage);
     };
-  }, [currentChannel, user]);
+  }, [currentChannel, user, messages, dispatch]);
 
   // Add downloadFile function
   const downloadFile = async (fileUrl) => {
@@ -878,7 +1046,7 @@ const Chat = () => {
     if (!parentId) return;
 
     // Immediately update the parent message's reply count
-    setMessages(prev => prev.map(msg => 
+    dispatch(setMessages({ channelId: currentChannel?.id, messages: messages.map(msg => 
       msg.id === parentId
         ? {
             ...msg,
@@ -886,7 +1054,7 @@ const Chat = () => {
             is_direct: currentChannel?.is_direct || false
           }
         : msg
-    ));
+    ) }));
 
     // If this is a DM, update the directMessages list
     if (currentChannel?.is_direct) {
@@ -935,7 +1103,7 @@ const Chat = () => {
   const renderMessage = (message, isPinned = false) => {
     const isOwn = isOwnMessage(message);
 
-  return (
+    return (
       <Box
         key={`message-${message.id}-${isPinned ? 'pinned' : 'regular'}`}
         py={2}
@@ -1279,8 +1447,8 @@ const Chat = () => {
                   py={1}
                   px={2}
                   color="gray.300"
-                  bg={currentChannel?.id === dm.channel_id ? 'blue.600' : 'transparent'}
-                  _hover={{ bg: currentChannel?.id === dm.channel_id ? 'blue.700' : 'gray.700' }}
+                  bg={selectedDmId === dm.channel_id ? 'blue.600' : 'transparent'}
+                  _hover={{ bg: selectedDmId === dm.channel_id ? 'blue.700' : 'gray.700' }}
                   leftIcon={
                     <Avatar size="xs" name={dm.user.username} src={dm.user.avatar_url} />
                   }
@@ -1326,8 +1494,9 @@ const Chat = () => {
           zIndex={2}
         />
 
+        {currentChannel ? (
+          <>
         {/* Channel Header */}
-        {currentChannel && (
           <Flex
             h="64px"
             px={6}
@@ -1336,41 +1505,41 @@ const Chat = () => {
             borderBottom="1px"
             borderColor="gray.700"
             bg="gray.800"
-            w="100%"
+              w="100%"
           >
-            <Flex align="center" gap={4} flex={1}>
+              <Flex align="center" gap={4} flex={1}>
               <Box>
                 <Flex align="center" gap={2}>
-                  <Text color="gray.400" fontSize="lg">#</Text>
-                  <Text color="white" fontWeight="medium" fontSize="lg">
+                    <Text color="gray.400" fontSize="lg">#</Text>
+                    <Text color="white" fontWeight="medium" fontSize="lg">
                     {currentChannel.name}
                   </Text>
                 </Flex>
                 {currentChannel.description && (
-                  <Text color="gray.400" fontSize="sm">
+                    <Text color="gray.400" fontSize="sm">
                     {currentChannel.description}
                   </Text>
                 )}
               </Box>
-              
-              {/* Add search box */}
-              <Box flex={1} maxW="400px" ml={4}>
-                <InputGroup size="sm">
-                  <InputLeftElement pointerEvents="none">
-                    <SearchIcon color="gray.400" />
-                  </InputLeftElement>
-                  <Input
-                    value={messageSearchTerm}
-                    onChange={(e) => setMessageSearchTerm(e.target.value)}
-                    placeholder="Search messages..."
-                    bg="gray.700"
-                    border="1px"
-                    borderColor="gray.600"
-                    _placeholder={{ color: 'gray.400' }}
-                    _hover={{ borderColor: 'gray.500' }}
-                    _focus={{ borderColor: 'blue.500', boxShadow: 'none' }}
-                  />
-                </InputGroup>
+                
+                {/* Add search box */}
+                <Box flex={1} maxW="400px" ml={4}>
+                  <InputGroup size="sm">
+                    <InputLeftElement pointerEvents="none">
+                      <SearchIcon color="gray.400" />
+                    </InputLeftElement>
+                    <Input
+                      value={messageSearchTerm}
+                      onChange={(e) => setMessageSearchTerm(e.target.value)}
+                      placeholder="Search messages..."
+                      bg="gray.700"
+                      border="1px"
+                      borderColor="gray.600"
+                      _placeholder={{ color: 'gray.400' }}
+                      _hover={{ borderColor: 'gray.500' }}
+                      _focus={{ borderColor: 'blue.500', boxShadow: 'none' }}
+                    />
+                  </InputGroup>
               </Box>
             </Flex>
 
@@ -1397,11 +1566,10 @@ const Chat = () => {
               </Tooltip>
             </HStack>
           </Flex>
-        )}
 
         {/* Messages Area */}
-        <Flex flex="1" overflow="hidden" maxW="100%">
-          <Box flex="1" display="flex" flexDirection="column" minW={0} maxW="100%">
+            <Flex flex="1" overflow="hidden" maxW="100%">
+              <Box flex="1" display="flex" flexDirection="column" minW={0} maxW="100%">
             {/* Messages List */}
             <Box 
               flex="1" 
@@ -1409,7 +1577,7 @@ const Chat = () => {
               px={6} 
               py={4} 
               className="custom-scrollbar"
-              maxW="100%"
+                  maxW="100%"
               css={{
                 '&::-webkit-scrollbar': {
                   width: '8px',
@@ -1427,72 +1595,72 @@ const Chat = () => {
               }}
             >
               <Box spacing={4} display="flex" flexDirection="column" minHeight="100%">
-                {/* Pinned Messages Section */}
-                {pinnedMessages.length > 0 && (
-                  <Box mb={6} bg="gray.800" p={4} borderRadius="md" position="sticky" top={0} zIndex={1}>
-                    <Flex align="center" gap={2} mb={4}>
-                      <Icon as={AiFillPushpin} color="blue.400" />
-                      <Text color="white" fontWeight="medium">Pinned Messages</Text>
-                      <Text color="gray.400" fontSize="sm">({pinnedMessages.length})</Text>
-                    </Flex>
-                    <VStack spacing={2} align="stretch">
-                      {pinnedMessages.map(message => (
-                  <Box
-                          key={`pinned-${message.id}`}
-                          p={2}
+                    {/* Pinned Messages Section */}
+                    {pinnedMessages.length > 0 && (
+                      <Box mb={6} bg="gray.800" p={4} borderRadius="md" position="sticky" top={0} zIndex={1}>
+                        <Flex align="center" gap={2} mb={4}>
+                          <Icon as={AiFillPushpin} color="blue.400" />
+                          <Text color="white" fontWeight="medium">Pinned Messages</Text>
+                          <Text color="gray.400" fontSize="sm">({pinnedMessages.length})</Text>
+                        </Flex>
+                        <VStack spacing={2} align="stretch">
+                          {pinnedMessages.map(message => (
+                            <Box
+                              key={`pinned-${message.id}`}
+                              p={2}
                     borderRadius="md"
-                          bg="gray.700"
-                          borderLeft="4px solid"
-                          borderLeftColor="blue.400"
+                              bg="gray.700"
+                              borderLeft="4px solid"
+                              borderLeftColor="blue.400"
                   >
-                          <Flex gap={3}>
+                              <Flex gap={3}>
                       <Avatar
                         size="sm"
                         name={message.username}
                         src={message.avatar_url}
                       />
-                            <Box flex="1" minW={0}>
-                              <Flex align="center" gap={2}>
-                                <Text fontWeight="bold" color="white">
+                                <Box flex="1" minW={0}>
+                                  <Flex align="center" gap={2}>
+                                    <Text fontWeight="bold" color="white">
                             {message.username}
                           </Text>
-                                <Text fontSize="xs" color="gray.400">
-                                  {formatTimestamp(message.created_at)}
+                                    <Text fontSize="xs" color="gray.400">
+                                      {formatTimestamp(message.created_at)}
                           </Text>
                         </Flex>
-                              {message.file ? (
-                                <Box
-                                  mt={2}
-                                  p={2}
-                                  bg="gray.600"
-                                  borderRadius="md"
-                                  maxW="300px"
-                                >
-                                  <VStack spacing={2} align="stretch">
-                                    <Flex align="center" gap={3}>
-                                      <Icon as={AttachmentIcon} boxSize={4} color="blue.300" />
-                                      <Box flex="1" minW={0}>
-                                        <Text fontSize="sm" color="white" isTruncated>
-                                          {message.file.filename}
-                                        </Text>
-                                        <Text fontSize="xs" color="gray.400">
-                                          {(message.file.size / 1024).toFixed(1)} KB
-                                        </Text>
-                                      </Box>
-                                    </Flex>
-                                    <Button
-                              size="sm"
-                                      leftIcon={<DownloadIcon />}
-                                      onClick={() => downloadFile(message.file.download_url)}
-                                      variant="ghost"
-                                      colorScheme="blue"
+                                  {message.file ? (
+                                    <Box
+                                      mt={2}
+                                      p={2}
+                                      bg="gray.600"
+                                      borderRadius="md"
+                                      maxW="300px"
                                     >
-                                      Download
-                                    </Button>
-                                  </VStack>
-                                </Box>
-                        ) : (
-                                <Text color="gray.100" whiteSpace="pre-wrap">
+                                      <VStack spacing={2} align="stretch">
+                                        <Flex align="center" gap={3}>
+                                          <Icon as={AttachmentIcon} boxSize={4} color="blue.300" />
+                                          <Box flex="1" minW={0}>
+                                            <Text fontSize="sm" color="white" isTruncated>
+                                              {message.file.filename}
+                                            </Text>
+                                            <Text fontSize="xs" color="gray.400">
+                                              {(message.file.size / 1024).toFixed(1)} KB
+                                            </Text>
+                                          </Box>
+                                        </Flex>
+                                        <Button
+                              size="sm"
+                                          leftIcon={<DownloadIcon />}
+                                          onClick={() => downloadFile(message.file.download_url)}
+                                          variant="ghost"
+                                          colorScheme="blue"
+                                        >
+                                          Download
+                                        </Button>
+                                      </VStack>
+                                    </Box>
+                                  ) : (
+                                    <Text color="gray.100" whiteSpace="pre-wrap">
                             {message.content}
                           </Text>
                         )}
@@ -1500,68 +1668,72 @@ const Chat = () => {
                     </Flex>
                   </Box>
                 ))}
-                    </VStack>
-                  </Box>
-                )}
-                
-                <Box flex="1" />
-                {/* Regular Messages */}
-                {Array.isArray(filteredMessages) && filteredMessages.map(message => renderMessage(message, false))}
+                        </VStack>
+                      </Box>
+                    )}
+                    
+                    <Box flex="1" />
+                    {/* Regular Messages */}
+                    {filteredMessages.map(message => renderMessage(message))}
                 <div ref={messagesEndRef} />
               </Box>
             </Box>
 
             {/* Message Input */}
-            <Box 
-              key="message-input-container" 
-              px={6} 
-              py={4} 
-              borderTop="1px" 
-              borderColor="gray.700"
-              maxW="100%"
-            >
-              <MessageInput
-                onSendMessage={handleSendMessage}
-                currentChannel={currentChannel}
-                handleTyping={handleTyping}
-              />
+                <Box 
+                  key="message-input-container" 
+                  px={6} 
+                  py={4} 
+                  borderTop="1px" 
+                  borderColor="gray.700"
+                  maxW="100%"
+                >
+                  <MessageInput
+                    onSendMessage={handleSendMessage}
+                    currentChannel={currentChannel}
+                    handleTyping={handleTyping}
+                  />
             </Box>
           </Box>
 
           {/* Thread Panel */}
           {showThreadPanel && (
-            <Box 
-              w={{ base: "100%", lg: "400px" }}
-              minW={{ base: "100%", lg: "400px" }}
-              borderLeft="1px" 
-              borderColor="gray.700" 
-              bg="gray.800"
-              position={{ base: "absolute", lg: "relative" }}
-              right={0}
-              top={0}
-              h="100%"
-              zIndex={5}
-            >
-              <ThreadPanel
-                parentMessage={activeThread}
-                onClose={() => {
-                  setShowThreadPanel(false);
-                  setActiveThread(null);
-                  setShowAIComposer(false);
-                  setSelectedMessage(null);
-                }}
-                onSendReply={handleNewReply}
-                currentChannel={currentChannel}
-                showAIComposer={showAIComposer}
-                selectedMessage={selectedMessage}
-                onAIComposerClose={() => {
-                  setShowAIComposer(false);
-                  setSelectedMessage(null);
-                }}
-              />
+                <Box 
+                  w={{ base: "100%", lg: "400px" }}
+                  minW={{ base: "100%", lg: "400px" }}
+                  borderLeft="1px" 
+                  borderColor="gray.700" 
+                  bg="gray.800"
+                  position={{ base: "absolute", lg: "relative" }}
+                  right={0}
+                  top={0}
+                  h="100%"
+                  zIndex={5}
+                >
+                  <ThreadPanel
+                    parentMessage={activeThread}
+                    onClose={() => {
+                      setShowThreadPanel(false);
+                      setActiveThread(null);
+                      setShowAIComposer(false);
+                      setSelectedMessage(null);
+                    }}
+                    onSendReply={handleNewReply}
+                    currentChannel={currentChannel}
+                    showAIComposer={showAIComposer}
+                    selectedMessage={selectedMessage}
+                    onAIComposerClose={() => {
+                      setShowAIComposer(false);
+                      setSelectedMessage(null);
+                    }}
+                  />
             </Box>
           )}
         </Flex>
+          </>
+        ) : (
+          <WelcomeView />
+        )}
       </Flex>
 
       {/* Modals */}

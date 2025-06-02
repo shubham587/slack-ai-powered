@@ -1,4 +1,4 @@
-import { createSlice, createAsyncThunk } from '@reduxjs/toolkit';
+import { createSlice, createAsyncThunk, createSelector } from '@reduxjs/toolkit';
 import axios from 'axios';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5001';
@@ -328,30 +328,48 @@ export const {
   handleMemberRemoved,
 } = channelsSlice.actions;
 
-// Selectors
-export const selectChannels = (state) => Object.values(state.channels.channels);
+// Memoized selectors
+export const selectChannels = createSelector(
+  [(state) => state.channels.channels],
+  (channels) => Object.values(channels)
+);
+
 export const selectActiveChannel = state => state.channels.activeChannel;
-export const selectChannelById = (state, channelId) => {
-  const channel = state.channels.channels[channelId];
-  if (!channel) return null;
-  
-  // Ensure members array exists and filter out any invalid members
-  return {
-    ...channel,
-    members: (channel.members || []).filter(member => member && member.id && member.username)
-  };
-};
-export const selectDirectMessageChannels = state => 
-  Object.values(state.channels.channels).filter(c => c.is_direct);
-export const selectPublicChannels = state => 
-  Object.values(state.channels.channels).filter(c => !c.is_private && !c.is_direct);
+
+export const selectChannelById = createSelector(
+  [(state) => state.channels.channels, (state, channelId) => channelId],
+  (channels, channelId) => {
+    const channel = channels[channelId];
+    if (!channel) return null;
+    return {
+      ...channel,
+      members: (channel.members || []).filter(member => member && member.id && member.username)
+    };
+  }
+);
+
+export const selectDirectMessageChannels = createSelector(
+  [(state) => state.channels.channels],
+  (channels) => Object.values(channels).filter(c => c.is_direct)
+);
+
+export const selectPublicChannels = createSelector(
+  [(state) => state.channels.channels],
+  (channels) => Object.values(channels).filter(c => !c.is_private && !c.is_direct)
+);
+
 export const selectPrivateChannels = state => 
   Object.values(state.channels.channels).filter(c => c.is_private && !c.is_direct);
+
 export const selectTypingUsers = (state, channelId) => 
   state.channels.typingUsers[channelId] || {};
-export const selectChannelMembers = (state, channelId) => {
-  const channel = state.channels.channels[channelId];
-  return channel ? channel.members : [];
-};
+
+export const selectChannelMembers = createSelector(
+  [(state) => state.channels.channels, (state, channelId) => channelId],
+  (channels, channelId) => {
+    const channel = channels[channelId];
+    return channel ? channel.members : [];
+  }
+);
 
 export default channelsSlice.reducer; 
