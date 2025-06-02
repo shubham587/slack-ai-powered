@@ -6,21 +6,28 @@ from flask_jwt_extended import jwt_required, get_jwt_identity
 from bson import ObjectId
 from app import db
 import traceback
-from flask_cors import CORS
+from flask_cors import CORS, cross_origin
 import json
+from datetime import datetime
 
 ai_bp = Blueprint('ai', __name__)
 
-# Configure CORS specifically for AI routes with updated settings
-CORS(ai_bp, resources={
-    r"/*": {
-        "origins": "http://localhost:5173",  # Specific origin instead of wildcard
-        "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-        "allow_headers": ["Content-Type", "Authorization"],
-        "supports_credentials": True,
-        "expose_headers": ["Content-Type", "Authorization"]
-    }
-})
+# Configure CORS specifically for AI routes
+CORS(ai_bp, 
+    resources={
+        r"/*": {
+            "origins": ["http://localhost:5173"],
+            "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+            "allow_headers": ["Content-Type", "Authorization"],
+            "supports_credentials": True,
+            "expose_headers": ["Content-Type", "Authorization"],
+            "max_age": 120,
+            "send_wildcard": False,
+            "vary_header": True
+        }
+    },
+    supports_credentials=True
+)
 
 # Initialize AI service with validation
 try:
@@ -39,6 +46,29 @@ MAX_REQUESTS = {
 
 # Store user request timestamps
 user_requests = {}
+
+def serialize_mongodb_obj(obj):
+    """Helper function to serialize MongoDB objects"""
+    if isinstance(obj, ObjectId):
+        return str(obj)
+    if isinstance(obj, datetime):
+        return obj.isoformat()
+    if isinstance(obj, list):
+        return [serialize_mongodb_obj(item) for item in list(obj)]
+    if isinstance(obj, dict):
+        return {key: serialize_mongodb_obj(value) for key, value in dict(obj).items()}
+    return obj
+
+@ai_bp.after_request
+def after_request(response):
+    origin = request.headers.get('Origin')
+    if origin == 'http://localhost:5173':
+        response.headers['Access-Control-Allow-Origin'] = origin
+        response.headers['Access-Control-Allow-Credentials'] = 'true'
+        response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS'
+        response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization'
+        response.headers['Access-Control-Max-Age'] = '120'
+    return response
 
 def rate_limit(f):
     @wraps(f)
@@ -647,6 +677,206 @@ def analyze_message():
     except Exception as e:
         print(f"Error in analyze_message route: {str(e)}")
         traceback.print_exc()
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
+
+@ai_bp.route('/generate-notes', methods=['POST', 'OPTIONS'])
+@cross_origin(supports_credentials=True)
+@jwt_required()
+@rate_limit
+def generate_notes():
+    """Generate meeting notes from a channel or thread conversation"""
+    try:
+        if request.method == 'OPTIONS':
+            return jsonify({'status': 'ok'})
+
+        if ai_service is None:
+            return jsonify({
+                'status': 'error',
+                'message': 'AI service not properly initialized'
+            }), 503
+
+        print("\n=== Starting Notes Generation ===")
+        
+        # Get parameters from query string
+        channel_id = request.args.get('channel_id')
+        thread_id = request.args.get('thread_id')
+
+        print(f"Channel ID: {channel_id}")
+        print(f"Thread ID: {thread_id}")
+
+        if not channel_id:
+            return jsonify({
+                'status': 'error',
+                'message': 'Channel ID is required'
+            }), 400
+
+        try:
+            # Convert string IDs to ObjectId
+            channel_id_obj = ObjectId(channel_id)
+            thread_id_obj = ObjectId(thread_id) if thread_id else None
+        except Exception as e:
+            print(f"Error converting IDs: {str(e)}")
+            return jsonify({
+                'status': 'error',
+                'message': 'Invalid ID format'
+            }), 400
+
+        # Get channel info
+        channel = db.channels.find_one({'_id': channel_id_obj})
+        if not channel:
+            return jsonify({
+                'status': 'error',
+                'message': 'Channel not found'
+            }), 404
+
+        print(f"Found channel: {channel.get('name', 'Unknown')}")
+
+        # Get messages
+        if thread_id_obj:
+            # Get thread messages
+            messages = list(db.messages.find({
+                'thread_id': thread_id_obj
+            }).sort('created_at', 1))
+            parent_message = db.messages.find_one({'_id': thread_id_obj})
+            if not parent_message:
+                return jsonify({
+                    'status': 'error',
+                    'message': 'Thread not found'
+                }), 404
+            thread_title = parent_message.get('content')
+            messages = [parent_message] + messages
+        else:
+            # Get channel messages
+            messages = list(db.messages.find({
+                'channel_id': channel_id_obj,
+                'thread_id': None
+            }).sort('created_at', 1))
+            thread_title = None
+
+        print(f"Found {len(messages)} messages")
+
+        if not messages:
+            return jsonify({
+                'status': 'error',
+                'message': 'No messages found to generate notes from'
+            }), 400
+
+        # Serialize messages for AI service
+        serialized_messages = []
+        for msg in messages:
+            try:
+                # Get user info
+                user = db.users.find_one({'_id': msg['sender_id']})
+                username = user['username'] if user else 'Unknown User'
+                
+                # Debug print message fields
+                print(f"\nProcessing message {msg['_id']}:")
+                print(f"- Content: {msg.get('content', '')[:50]}...")
+                print(f"- Created at type: {type(msg.get('created_at'))}")
+                print(f"- Updated at type: {type(msg.get('updated_at'))}")
+                
+                # Handle created_at
+                created_at = msg.get('created_at')
+                if isinstance(created_at, str):
+                    try:
+                        created_at = datetime.fromisoformat(created_at)
+                    except ValueError:
+                        created_at = datetime.utcnow()
+                elif not isinstance(created_at, datetime):
+                    created_at = datetime.utcnow()
+                
+                # Handle updated_at
+                updated_at = msg.get('updated_at')
+                if isinstance(updated_at, str):
+                    try:
+                        updated_at = datetime.fromisoformat(updated_at)
+                    except ValueError:
+                        updated_at = datetime.utcnow()
+                elif not isinstance(updated_at, datetime):
+                    updated_at = datetime.utcnow()
+                
+                # Create serialized message
+                serialized_msg = {
+                    'id': str(msg['_id']),
+                    'content': msg.get('content', ''),
+                    'sender_id': str(msg['sender_id']),
+                    'username': username,
+                    'created_at': created_at.isoformat(),
+                    'updated_at': updated_at.isoformat()
+                }
+                serialized_messages.append(serialized_msg)
+                
+            except Exception as e:
+                print(f"Error serializing message {msg.get('_id')}: {str(e)}")
+                print(f"Message data: {msg}")
+                continue
+
+        print(f"\nSuccessfully serialized {len(serialized_messages)} messages")
+
+        # Generate notes using AI service
+        print("\nGenerating notes with AI service...")
+        notes_data = ai_service.generate_meeting_notes(
+            messages=serialized_messages,
+            channel_name=channel.get('name', ''),
+            thread_title=thread_title
+        )
+        print("Notes generated successfully")
+
+        # Get current user ID
+        current_user_id = get_jwt_identity()
+
+        # Create notes object with explicit datetime objects
+        now = datetime.utcnow()
+        notes = {
+            'title': notes_data['title'],
+            'channel_id': str(channel_id_obj),
+            'thread_id': str(thread_id_obj) if thread_id_obj else None,
+            'creator_id': current_user_id,
+            'sections': notes_data['sections'],
+            'created_at': now,
+            'updated_at': now,
+            'version': 1,
+            'is_draft': True
+        }
+
+        # Save notes to database
+        print("\nSaving notes to database...")
+        result = db.notes.insert_one(notes)
+        notes['id'] = str(result.inserted_id)
+        print(f"Notes saved with ID: {notes['id']}")
+
+        # Serialize the final response
+        try:
+            serialized_notes = {
+                'id': notes['id'],
+                'title': notes['title'],
+                'channel_id': notes['channel_id'],
+                'thread_id': notes['thread_id'],
+                'creator_id': notes['creator_id'],
+                'sections': notes['sections'],
+                'created_at': notes['created_at'].isoformat(),
+                'updated_at': notes['updated_at'].isoformat(),
+                'version': notes['version'],
+                'is_draft': notes['is_draft']
+            }
+        except Exception as e:
+            print(f"Error serializing final notes: {str(e)}")
+            print(f"Notes data: {notes}")
+            raise
+
+        print("\nNotes generation completed successfully")
+        return jsonify({
+            'status': 'success',
+            'data': serialized_notes
+        })
+
+    except Exception as e:
+        print(f"\nError in generate_notes endpoint: {str(e)}")
+        print("Full traceback:")
+        print(traceback.format_exc())
         return jsonify({
             'status': 'error',
             'message': str(e)

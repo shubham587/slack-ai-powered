@@ -1,4 +1,4 @@
-from flask import Flask
+from flask import Flask, request
 from flask_socketio import SocketIO
 from flask_cors import CORS
 from flask_jwt_extended import JWTManager
@@ -34,15 +34,38 @@ def create_app(test_config=None):
     app.url_map.strict_slashes = False  # Allow URLs with or without trailing slashes
     
     # Configure CORS
-    CORS(app, resources={
-        r"/*": {
-            "origins": ["http://localhost:5173"],
-            "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-            "allow_headers": ["Content-Type", "Authorization"],
-            "supports_credentials": True,
-            "expose_headers": ["Content-Type", "Authorization"]
-        }
-    })
+    CORS(app, 
+        resources={
+            r"/api/*": {
+                "origins": ["http://localhost:5173"],
+                "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+                "allow_headers": ["Content-Type", "Authorization"],
+                "supports_credentials": True,
+                "expose_headers": ["Content-Type", "Authorization"],
+                "max_age": 120,
+                "send_wildcard": False,
+                "vary_header": True
+            }
+        },
+        supports_credentials=True
+    )
+    
+    @app.after_request
+    def after_request(response):
+        if request.method == 'OPTIONS':
+            response = app.make_default_options_response()
+        
+        # Don't add CORS headers for static files
+        if not request.path.startswith('/static/'):
+            origin = request.headers.get('Origin')
+            if origin == 'http://localhost:5173':
+                response.headers['Access-Control-Allow-Origin'] = origin
+                response.headers['Access-Control-Allow-Credentials'] = 'true'
+                response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS'
+                response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization'
+                response.headers['Access-Control-Max-Age'] = '120'
+        
+        return response
     
     # Initialize JWT
     jwt = JWTManager(app)
@@ -85,6 +108,7 @@ def create_app(test_config=None):
     from app.routes.users import users_bp
     from app.routes.invitations import invitations_bp
     from app.routes.ai import ai_bp
+    from app.routes.notes import notes_bp
     
     # Register blueprints
     app.register_blueprint(auth_bp, url_prefix='/api/auth')
@@ -94,6 +118,7 @@ def create_app(test_config=None):
     app.register_blueprint(files_bp, url_prefix='/api/files')
     app.register_blueprint(invitations_bp, url_prefix='/api/invitations')
     app.register_blueprint(ai_bp, url_prefix='/api/ai')
+    app.register_blueprint(notes_bp, url_prefix='/api/notes')
     
     # Import socket event handlers
     from app.sockets import events

@@ -377,3 +377,102 @@ Input: "you need to send this report immediately!!!"
         response = response.strip('"\'')
         
         return response 
+
+    def generate_meeting_notes(
+        self,
+        messages: List[dict],
+        channel_name: str,
+        thread_title: Optional[str] = None,
+        model_version: Literal['3.5', '4'] = '4'
+    ) -> dict:
+        """
+        Generate structured meeting notes from a list of messages
+        Returns a dictionary with title and sections for the notes
+        """
+        try:
+            # Format messages for the prompt
+            formatted_messages = []
+            for msg in messages:
+                # Get timestamp - it's already in ISO format from serialization
+                timestamp = msg.get('created_at', '')
+                formatted_messages.append(f"{msg.get('username', 'Unknown')}: ({timestamp})\n{msg.get('content', '')}\n")
+            
+            messages_text = "\n".join(formatted_messages)
+            
+            system_prompt = """You are an expert meeting notes generator.
+Your task is to analyze the conversation and create clear, structured meeting notes.
+
+Guidelines:
+1. Create a concise but descriptive title
+2. Organize content into relevant sections
+3. Extract key points, decisions, and action items
+4. Maintain professional language
+5. Focus on important information
+6. Use bullet points for clarity
+7. Include timestamps for key decisions
+
+Output Format (JSON):
+{
+    "title": "Meeting Title",
+    "sections": [
+        {
+            "title": "Summary",
+            "content": ["Key point 1", "Key point 2"]
+        },
+        {
+            "title": "Decisions Made",
+            "content": ["Decision 1 (at 2:30 PM)", "Decision 2 (at 2:45 PM)"]
+        },
+        {
+            "title": "Action Items",
+            "content": ["Action 1 - Assigned to X", "Action 2 - Assigned to Y"]
+        },
+        {
+            "title": "Discussion Points",
+            "content": ["Discussion topic 1", "Discussion topic 2"]
+        }
+    ]
+}"""
+
+            context = f"""This is a conversation from the channel: {channel_name}"""
+            if thread_title:
+                context += f"\nThread Topic: {thread_title}"
+            
+            prompt = f"""{context}
+
+Please analyze this conversation and generate structured meeting notes:
+
+{messages_text}"""
+
+            # Generate notes using specified model
+            response, usage = self.generate_response(
+                prompt=prompt,
+                model_version=model_version,
+                temperature=0.7,
+                system_prompt=system_prompt
+            )
+
+            # Parse the response as JSON
+            try:
+                notes = json.loads(response)
+                
+                # Validate required structure
+                if not isinstance(notes, dict):
+                    raise ValueError("Response must be a dictionary")
+                if "title" not in notes:
+                    raise ValueError("Missing 'title' in response")
+                if "sections" not in notes:
+                    raise ValueError("Missing 'sections' in response")
+                if not isinstance(notes["sections"], list):
+                    raise ValueError("'sections' must be a list")
+                
+                return notes
+                
+            except json.JSONDecodeError:
+                raise ValueError("Invalid JSON response from AI model")
+
+        except Exception as e:
+            print(f"Error in generate_meeting_notes: {str(e)}")
+            print("Full traceback:")
+            print(traceback.format_exc())
+            raise 

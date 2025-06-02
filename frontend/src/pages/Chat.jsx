@@ -69,6 +69,8 @@ import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
 import { selectChannelMessages, setMessages, setLoading, setError } from '../store/slices/messagesSlice';
 import { createSelector } from 'reselect';
+import { FiFileText } from 'react-icons/fi';
+import NotesModal from '../components/notes/NotesModal';
 
 const WelcomeView = () => (
   <Flex
@@ -135,6 +137,7 @@ const Chat = () => {
   const [selectedMessage, setSelectedMessage] = useState(null);
   const [messageSearchTerm, setMessageSearchTerm] = useState('');
   const [userSearchTerm, setUserSearchTerm] = useState('');
+  const [showNotesModal, setShowNotesModal] = useState(false);
 
   const messagesEndRef = useRef(null);
   const toast = useToast();
@@ -1544,6 +1547,15 @@ const Chat = () => {
             </Flex>
 
             <HStack spacing={2}>
+              <Tooltip label="Generate Channel Notes">
+                <IconButton
+                  icon={<FiFileText />}
+                  variant="ghost"
+                  colorScheme="blue"
+                  size="sm"
+                  onClick={() => setShowNotesModal(true)}
+                />
+              </Tooltip>
               <Tooltip key="thread-tooltip" label="Thread View">
                 <IconButton
                   key="thread-button"
@@ -1827,6 +1839,14 @@ const Chat = () => {
           }}
         />
       )}
+
+      {/* Notes Modal */}
+      <NotesModal
+        isOpen={showNotesModal}
+        onClose={() => setShowNotesModal(false)}
+        channelId={currentChannel?.id}
+        channelName={currentChannel?.name}
+      />
     </Grid>
   );
 };

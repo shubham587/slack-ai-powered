@@ -19,8 +19,10 @@ import {
 import { CloseIcon, EditIcon, DeleteIcon, ChatIcon } from '@chakra-ui/icons';
 import { BsThreeDotsVertical } from 'react-icons/bs';
 import { AiOutlineRobot } from 'react-icons/ai';
+import { FiFileText } from 'react-icons/fi';
 import MessageInput from './MessageInput';
 import AutoReplyComposer from '../ai/AutoReplyComposer';
+import NotesModal from '../notes/NotesModal';
 import { getSocket } from '../../socket';
 import { useSelector } from 'react-redux';
 import { selectUser } from '../../store/slices/authSlice';
@@ -45,6 +47,7 @@ const ThreadPanel = ({
   const [replyingTo, setReplyingTo] = useState(null);
   const [width, setWidth] = useState(DEFAULT_WIDTH);
   const [isResizing, setIsResizing] = useState(false);
+  const [showNotesModal, setShowNotesModal] = useState(false);
   const toast = useToast();
   const currentUser = useSelector(selectUser);
 
@@ -677,13 +680,24 @@ const ThreadPanel = ({
         <Text fontSize="lg" fontWeight="semibold" color="white">
           Thread
         </Text>
-        <IconButton
-          icon={<CloseIcon />}
-          onClick={onClose}
-          variant="ghost"
-          colorScheme="whiteAlpha"
-          size="sm"
-        />
+        <Flex gap={2}>
+          <Tooltip label="Generate Notes">
+            <IconButton
+              icon={<FiFileText />}
+              onClick={() => setShowNotesModal(true)}
+              variant="ghost"
+              colorScheme="blue"
+              size="sm"
+            />
+          </Tooltip>
+          <IconButton
+            icon={<CloseIcon />}
+            onClick={onClose}
+            variant="ghost"
+            colorScheme="whiteAlpha"
+            size="sm"
+          />
+        </Flex>
       </Flex>
 
       <VStack spacing={4} align="stretch" flex="1" overflowY="auto" p={4}>
@@ -845,6 +859,16 @@ const ThreadPanel = ({
           }}
         />
       )}
+
+      {/* Notes Modal */}
+      <NotesModal
+        isOpen={showNotesModal}
+        onClose={() => setShowNotesModal(false)}
+        channelId={currentChannel?.id}
+        threadId={parentMessage?._id || parentMessage?.id}
+        channelName={currentChannel?.name}
+        threadTitle={parentMessage?.content}
+      />
     </Flex>
   );
 };
