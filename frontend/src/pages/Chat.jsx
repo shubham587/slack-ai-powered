@@ -60,6 +60,7 @@ import { BsThreeDotsVertical } from 'react-icons/bs';
 import { AiFillPushpin, AiOutlinePushpin, AiOutlineRobot } from 'react-icons/ai';
 import ThreadPanel from '../components/messages/ThreadPanel';
 import AutoReplyComposer from '../components/ai/AutoReplyComposer';
+import LogoutButton from '../components/common/LogoutButton';
 
 const Chat = () => {
   const dispatch = useDispatch();
@@ -1297,6 +1298,11 @@ const Chat = () => {
             </Box>
           </Box>
         </Box>
+
+        {/* Add LogoutButton at the bottom of sidebar */}
+        <Box position="absolute" bottom={4} left={4} width="calc(100% - 32px)">
+          <LogoutButton />
+        </Box>
       </Box>
 
       {/* Main Chat Area */}
@@ -1637,6 +1643,18 @@ const Chat = () => {
         onClose={() => setShowChannelSettings(false)}
         channelId={currentChannel?.id}
       />
+
+      {/* AI Composer */}
+      {showAIComposer && selectedMessage && !showThreadPanel && (
+        <AutoReplyComposer
+          message={selectedMessage}
+          onSelectReply={handleSelectAIReply}
+          onClose={() => {
+            setShowAIComposer(false);
+            setSelectedMessage(null);
+          }}
+        />
+      )}
     </Grid>
   );
 };

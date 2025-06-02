@@ -2,6 +2,21 @@ import { useState } from 'react';
 import { useDispatch } from 'react-redux';
 import { Link, useNavigate } from 'react-router-dom';
 import { register } from '../store/slices/authSlice';
+import {
+  Box,
+  Button,
+  FormControl,
+  FormLabel,
+  Input,
+  VStack,
+  Text,
+  Heading,
+  Alert,
+  AlertIcon,
+  Container,
+  useColorModeValue,
+} from '@chakra-ui/react';
+import Logo from '../components/common/Logo';
 
 const Register = () => {
   const dispatch = useDispatch();
@@ -13,6 +28,7 @@ const Register = () => {
     confirmPassword: '',
   });
   const [error, setError] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
 
   const handleChange = (e) => {
     setFormData({
@@ -24,9 +40,11 @@ const Register = () => {
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
+    setIsLoading(true);
 
     if (formData.password !== formData.confirmPassword) {
       setError('Passwords do not match');
+      setIsLoading(false);
       return;
     }
 
@@ -36,103 +54,146 @@ const Register = () => {
       navigate('/');
     } catch (err) {
       setError(err.message || 'Failed to register');
+    } finally {
+      setIsLoading(false);
     }
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
-      <div className="max-w-md w-full space-y-8">
-        <div>
-          <h2 className="mt-6 text-center text-3xl font-extrabold text-gray-900">
-            Create your account
-          </h2>
-          <p className="mt-2 text-center text-sm text-gray-600">
-            Or{' '}
-            <Link to="/login" className="font-medium text-indigo-600 hover:text-indigo-500">
-              sign in to your account
-            </Link>
-          </p>
-        </div>
-        <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
-          {error && (
-            <div className="rounded-md bg-red-50 p-4">
-              <div className="text-sm text-red-700">{error}</div>
-            </div>
-          )}
-          <div className="rounded-md shadow-sm -space-y-px">
-            <div>
-              <label htmlFor="username" className="sr-only">
-                Username
-              </label>
-              <input
-                id="username"
-                name="username"
-                type="text"
-                required
-                className="appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-t-md focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 focus:z-10 sm:text-sm"
-                placeholder="Username"
-                value={formData.username}
-                onChange={handleChange}
-              />
-            </div>
-            <div>
-              <label htmlFor="email" className="sr-only">
-                Email
-              </label>
-              <input
-                id="email"
-                name="email"
-                type="email"
-                required
-                className="appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 focus:z-10 sm:text-sm"
-                placeholder="Email"
-                value={formData.email}
-                onChange={handleChange}
-              />
-            </div>
-            <div>
-              <label htmlFor="password" className="sr-only">
-                Password
-              </label>
-              <input
-                id="password"
-                name="password"
-                type="password"
-                required
-                className="appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 focus:z-10 sm:text-sm"
-                placeholder="Password"
-                value={formData.password}
-                onChange={handleChange}
-              />
-            </div>
-            <div>
-              <label htmlFor="confirmPassword" className="sr-only">
-                Confirm Password
-              </label>
-              <input
-                id="confirmPassword"
-                name="confirmPassword"
-                type="password"
-                required
-                className="appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-b-md focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 focus:z-10 sm:text-sm"
-                placeholder="Confirm Password"
-                value={formData.confirmPassword}
-                onChange={handleChange}
-              />
-            </div>
-          </div>
+    <Box
+      minH="100vh"
+      bg="gray.900"
+      display="flex"
+      alignItems="center"
+      justifyContent="center"
+      py={12}
+      px={4}
+    >
+      <Container maxW="md" p={8} bg="gray.800" borderRadius="xl" boxShadow="2xl">
+        <VStack spacing={8} align="stretch">
+          {/* Logo and Title */}
+          <VStack spacing={6}>
+            <Logo size="lg" />
+            <VStack spacing={2}>
+              <Heading
+                as="h1"
+                fontSize="2xl"
+                fontWeight="bold"
+                textAlign="center"
+                color="white"
+              >
+                Create your account
+              </Heading>
+              <Text color="gray.400" fontSize="sm" textAlign="center">
+                Join Slack AI-Powered to start collaborating
+              </Text>
+            </VStack>
+          </VStack>
 
-          <div>
-            <button
-              type="submit"
-              className="group relative w-full flex justify-center py-2 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
-            >
-              Create Account
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
+          {/* Error Alert */}
+          {error && (
+            <Alert status="error" bg="red.900" color="white" borderRadius="md">
+              <AlertIcon color="red.200" />
+              {error}
+            </Alert>
+          )}
+
+          {/* Registration Form */}
+          <form onSubmit={handleSubmit}>
+            <VStack spacing={4}>
+              <FormControl isRequired>
+                <FormLabel color="gray.300">Username</FormLabel>
+                <Input
+                  name="username"
+                  value={formData.username}
+                  onChange={handleChange}
+                  placeholder="Enter your username"
+                  bg="gray.700"
+                  border="1px"
+                  borderColor="gray.600"
+                  _hover={{ borderColor: 'gray.500' }}
+                  _focus={{ borderColor: 'blue.500', boxShadow: 'none' }}
+                  color="white"
+                />
+              </FormControl>
+
+              <FormControl isRequired>
+                <FormLabel color="gray.300">Email</FormLabel>
+                <Input
+                  name="email"
+                  type="email"
+                  value={formData.email}
+                  onChange={handleChange}
+                  placeholder="Enter your email"
+                  bg="gray.700"
+                  border="1px"
+                  borderColor="gray.600"
+                  _hover={{ borderColor: 'gray.500' }}
+                  _focus={{ borderColor: 'blue.500', boxShadow: 'none' }}
+                  color="white"
+                />
+              </FormControl>
+
+              <FormControl isRequired>
+                <FormLabel color="gray.300">Password</FormLabel>
+                <Input
+                  name="password"
+                  type="password"
+                  value={formData.password}
+                  onChange={handleChange}
+                  placeholder="Create a password"
+                  bg="gray.700"
+                  border="1px"
+                  borderColor="gray.600"
+                  _hover={{ borderColor: 'gray.500' }}
+                  _focus={{ borderColor: 'blue.500', boxShadow: 'none' }}
+                  color="white"
+                />
+              </FormControl>
+
+              <FormControl isRequired>
+                <FormLabel color="gray.300">Confirm Password</FormLabel>
+                <Input
+                  name="confirmPassword"
+                  type="password"
+                  value={formData.confirmPassword}
+                  onChange={handleChange}
+                  placeholder="Confirm your password"
+                  bg="gray.700"
+                  border="1px"
+                  borderColor="gray.600"
+                  _hover={{ borderColor: 'gray.500' }}
+                  _focus={{ borderColor: 'blue.500', boxShadow: 'none' }}
+                  color="white"
+                />
+              </FormControl>
+
+              <Button
+                type="submit"
+                colorScheme="blue"
+                size="lg"
+                width="full"
+                mt={6}
+                isLoading={isLoading}
+                loadingText="Creating Account..."
+              >
+                Create Account
+              </Button>
+            </VStack>
+          </form>
+
+          {/* Login Link */}
+          <Text color="gray.400" fontSize="sm" textAlign="center">
+            Already have an account?{' '}
+            <Link to="/login">
+              <Text as="span" color="blue.400" _hover={{ color: 'blue.300' }}>
+                Sign in here
+              </Text>
+            </Link>
+          </Text>
+        </VStack>
+      </Container>
+    </Box>
   );
 };
 

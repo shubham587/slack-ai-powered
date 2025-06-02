@@ -2,6 +2,21 @@ import { useState } from 'react';
 import { useDispatch } from 'react-redux';
 import { Link, useNavigate } from 'react-router-dom';
 import { login } from '../store/slices/authSlice';
+import {
+  Box,
+  Button,
+  FormControl,
+  FormLabel,
+  Input,
+  VStack,
+  Text,
+  Heading,
+  Alert,
+  AlertIcon,
+  Container,
+  useColorModeValue,
+} from '@chakra-ui/react';
+import Logo from '../components/common/Logo';
 
 const Login = () => {
   const dispatch = useDispatch();
@@ -11,6 +26,7 @@ const Login = () => {
     password: '',
   });
   const [error, setError] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
 
   const handleChange = (e) => {
     setFormData({
@@ -22,79 +38,123 @@ const Login = () => {
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
+    setIsLoading(true);
 
     try {
       await dispatch(login(formData)).unwrap();
       navigate('/');
     } catch (err) {
       setError(err.message || 'Failed to login');
+    } finally {
+      setIsLoading(false);
     }
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
-      <div className="max-w-md w-full space-y-8">
-        <div>
-          <h2 className="mt-6 text-center text-3xl font-extrabold text-gray-900">
-            Sign in to your account
-          </h2>
-          <p className="mt-2 text-center text-sm text-gray-600">
-            Or{' '}
-            <Link to="/register" className="font-medium text-indigo-600 hover:text-indigo-500">
-              create a new account
-            </Link>
-          </p>
-        </div>
-        <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
-          {error && (
-            <div className="rounded-md bg-red-50 p-4">
-              <div className="text-sm text-red-700">{error}</div>
-            </div>
-          )}
-          <div className="rounded-md shadow-sm -space-y-px">
-            <div>
-              <label htmlFor="username" className="sr-only">
-                Username or Email
-              </label>
-              <input
-                id="username"
-                name="username"
-                type="text"
-                required
-                className="appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-t-md focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 focus:z-10 sm:text-sm"
-                placeholder="Username or Email"
-                value={formData.username}
-                onChange={handleChange}
-              />
-            </div>
-            <div>
-              <label htmlFor="password" className="sr-only">
-                Password
-              </label>
-              <input
-                id="password"
-                name="password"
-                type="password"
-                required
-                className="appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-b-md focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 focus:z-10 sm:text-sm"
-                placeholder="Password"
-                value={formData.password}
-                onChange={handleChange}
-              />
-            </div>
-          </div>
+    <Box
+      minH="100vh"
+      bg="gray.900"
+      display="flex"
+      alignItems="center"
+      justifyContent="center"
+      py={12}
+      px={4}
+    >
+      <Container maxW="md" p={8} bg="gray.800" borderRadius="xl" boxShadow="2xl">
+        <VStack spacing={8} align="stretch">
+          {/* Logo and Title */}
+          <VStack spacing={6}>
+            <Logo size="lg" />
+            <VStack spacing={2}>
+              <Heading
+                as="h1"
+                fontSize="2xl"
+                fontWeight="bold"
+                textAlign="center"
+                color="white"
+              >
+                Welcome back
+              </Heading>
+              <Text color="gray.400" fontSize="sm" textAlign="center">
+                Sign in to continue to Slack AI-Powered
+              </Text>
+            </VStack>
+          </VStack>
 
-          <div>
-            <button
-              type="submit"
-              className="group relative w-full flex justify-center py-2 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
-            >
-              Sign in
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
+          {/* Error Alert */}
+          {error && (
+            <Alert status="error" borderRadius="md" bg="red.900" color="white">
+              <AlertIcon />
+              {error}
+            </Alert>
+          )}
+
+          {/* Login Form */}
+          <form onSubmit={handleSubmit}>
+            <VStack spacing={4}>
+              <FormControl>
+                <FormLabel color="gray.400">Username or Email</FormLabel>
+                <Input
+                  name="username"
+                  type="text"
+                  required
+                  value={formData.username}
+                  onChange={handleChange}
+                  bg="gray.700"
+                  border="none"
+                  color="white"
+                  _placeholder={{ color: 'gray.400' }}
+                  _hover={{ bg: 'gray.600' }}
+                  _focus={{ bg: 'gray.600', boxShadow: 'none' }}
+                  size="lg"
+                />
+              </FormControl>
+
+              <FormControl>
+                <FormLabel color="gray.400">Password</FormLabel>
+                <Input
+                  name="password"
+                  type="password"
+                  required
+                  value={formData.password}
+                  onChange={handleChange}
+                  bg="gray.700"
+                  border="none"
+                  color="white"
+                  _placeholder={{ color: 'gray.400' }}
+                  _hover={{ bg: 'gray.600' }}
+                  _focus={{ bg: 'gray.600', boxShadow: 'none' }}
+                  size="lg"
+                />
+              </FormControl>
+
+              <Button
+                type="submit"
+                colorScheme="blue"
+                size="lg"
+                width="full"
+                isLoading={isLoading}
+                loadingText="Signing in..."
+                _hover={{ bg: 'blue.600' }}
+                mt={2}
+              >
+                Sign in
+              </Button>
+            </VStack>
+          </form>
+
+          {/* Register Link */}
+          <Text color="gray.400" fontSize="sm" textAlign="center">
+            Don't have an account?{' '}
+            <Link to="/register">
+              <Text as="span" color="blue.400" _hover={{ color: 'blue.300' }}>
+                Create one now
+              </Text>
+            </Link>
+          </Text>
+        </VStack>
+      </Container>
+    </Box>
   );
 };
 

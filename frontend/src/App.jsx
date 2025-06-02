@@ -8,6 +8,7 @@ import PendingInvitations from './components/invitations/PendingInvitations';
 import { useSelector } from 'react-redux';
 import { selectUser } from './store/slices/authSlice';
 import MainRoutes from './routes/MainRoutes';
+import LogoutButton from './components/common/LogoutButton';
 
 // Extend Chakra UI theme
 const theme = extendTheme({
@@ -61,9 +62,12 @@ const AuthenticatedContent = () => {
   return (
     <Box position="relative" h="100vh" w="100vw" overflow="hidden">
       {user && (
-        <Box position="fixed" top={4} right={4} zIndex={1000}>
-          <PendingInvitations />
-        </Box>
+        <>
+          <Box position="fixed" top={4} right={4} zIndex={1000}>
+            <PendingInvitations />
+          </Box>
+          <LogoutButton />
+        </>
       )}
       <Box h="100%" w="100%" overflow="hidden">
         <MainRoutes />
