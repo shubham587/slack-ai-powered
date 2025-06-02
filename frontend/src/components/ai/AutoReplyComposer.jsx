@@ -13,6 +13,7 @@ import {
   AlertIcon,
   AlertTitle,
   AlertDescription,
+  VStack,
 } from '@chakra-ui/react';
 import { CloseIcon, RepeatIcon } from '@chakra-ui/icons';
 
@@ -46,125 +47,54 @@ const AutoReplyComposer = ({
   const [selectedLength, setSelectedLength] = useState('medium');
   const [retryCount, setRetryCount] = useState(0);
 
-  const generateSuggestions = async () => {
+  const fetchSuggestions = async () => {
     try {
       setIsLoading(true);
       setError(null);
-
-      // Debug logs
-      console.log('AutoReplyComposer - Starting suggestion generation:', {
+      
+      const token = localStorage.getItem('token');
+      const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:5001';
+      
+      // Choose endpoint based on whether it's a quick reply or contextual reply
+      const endpoint = message.isQuickReply ? '/api/ai/suggest-quick-reply' : '/api/ai/suggest-reply';
+      
+      console.log('AutoReplyComposer - Fetching suggestions:', {
+        endpoint,
+        isQuickReply: message.isQuickReply,
         message,
-        threadContext,
-        selectedTone,
-        selectedLength
+        threadContext: threadContext?.length
       });
-
-      // Ensure thread context is properly formatted and sorted
-      const processedContext = threadContext
-        .map(msg => ({
-          content: msg.content || '',
-          username: msg.username || 'User',
-          created_at: msg.created_at || new Date().toISOString(),
-          id: msg._id || msg.id,
-          sender_id: msg.sender_id // Ensure we pass sender_id for role determination
-        }))
-        .filter(msg => msg.content && msg.content.trim() !== '')
-        .sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
-
-      // Log detailed context information
-      console.log('AutoReplyComposer - Thread Context Analysis:', {
-        originalContext: threadContext.map(msg => ({
-          id: msg._id || msg.id,
-          content: msg.content,
-          username: msg.username,
-          created_at: msg.created_at,
-          sender_id: msg.sender_id
-        })),
-        processedContext: processedContext.map(msg => ({
-          id: msg.id,
-          content: msg.content,
-          username: msg.username,
-          created_at: msg.created_at,
-          sender_id: msg.sender_id
-        })),
-        contextStats: {
-          originalLength: threadContext.length,
-          processedLength: processedContext.length,
-          messagesWithContent: processedContext.length,
-          timeRange: processedContext.length > 0 ? {
-            first: new Date(processedContext[0].created_at).toISOString(),
-            last: new Date(processedContext[processedContext.length - 1].created_at).toISOString()
-          } : null
-        },
-        targetMessage: {
-          content: typeof message === 'string' ? message : message.content,
-          useFullContext: typeof message === 'string' ? true : message.useFullContext,
-          is_improvement: typeof message === 'string' ? false : message.is_improvement
-        }
-      });
-
-      // Create a more detailed context object
-      const requestBody = {
-        message: typeof message === 'string' ? 
-          { content: message, is_improvement: false, useFullContext: true } : 
-          { 
-            ...message,
-            content: message.content,
-            is_improvement: message.is_improvement || false,
-            useFullContext: true // Always use full context for better responses
-          },
-        thread_context: processedContext, // Changed from threadContext to thread_context to match backend expectation
-        tone: selectedTone,
-        length: selectedLength,
-        useFullContext: true // Always use full context for better responses
-      };
-
-      console.log('AutoReplyComposer - Final Request Body:', {
-        messageDetails: requestBody.message,
-        threadContextLength: requestBody.thread_context.length,
-        threadContextMessages: requestBody.thread_context.map(msg => ({
-          content: msg.content,
-          username: msg.username,
-          created_at: msg.created_at,
-          sender_id: msg.sender_id
-        })),
-        useFullContext: requestBody.useFullContext,
-        serializedBody: JSON.stringify(requestBody) // Log the actual serialized body
-      });
-
-      const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5001'}/api/ai/suggest-reply`, {
+      
+      const response = await fetch(`${baseUrl}${endpoint}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
+          'Authorization': `Bearer ${token}`
         },
         body: JSON.stringify({
-          ...requestBody,
-          thread_context: requestBody.thread_context // Ensure thread_context is explicitly included
+          message: message,
+          thread_context: !message.isQuickReply ? threadContext : undefined,
+          tone: selectedTone,
+          length: selectedLength
         })
       });
 
       if (!response.ok) {
         const errorData = await response.json();
-        console.error('AutoReplyComposer - API Error:', errorData);
-        throw new Error(errorData.message || 'Failed to generate suggestions');
+        throw new Error(errorData.message || 'Failed to fetch suggestions');
       }
 
       const data = await response.json();
-      console.log('AutoReplyComposer - API Response:', {
-        status: data.status,
-        suggestionsCount: data.suggestions?.length,
-        firstSuggestion: data.suggestions?.[0]?.text?.substring(0, 100) + '...'
-      });
+      console.log('AutoReplyComposer - Received suggestions:', data);
       
       if (data.status === 'success' && data.suggestions) {
         setSuggestions(data.suggestions);
       } else {
-        throw new Error(data.message || 'Failed to generate suggestions');
+        throw new Error('Invalid response format');
       }
     } catch (error) {
-      console.error('AutoReplyComposer - Error:', error);
-      setError('Failed to generate suggestions. Please try again.');
+      console.error('Error fetching suggestions:', error);
+      setError(error.message);
     } finally {
       setIsLoading(false);
     }
@@ -192,190 +122,224 @@ const AutoReplyComposer = ({
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4">
-      <Box className="bg-gray-800 rounded-lg shadow-xl w-full max-w-2xl">
-        {/* Header */}
-        <Flex p={4} borderBottom="1px" borderColor="gray.700" justify="space-between" align="center">
-          <Text fontSize="lg" fontWeight="semibold" color="white">
-            {message.is_improvement ? 'AI Message Improvements' : 'AI Reply Suggestions'}
-          </Text>
-          <IconButton
-            icon={<CloseIcon />}
-            size="sm"
-            variant="ghost"
-            colorScheme="whiteAlpha"
-            onClick={onClose}
-          />
-        </Flex>
-
-        {/* Message being replied to or improved */}
-        <Box p={4} borderBottom="1px" borderColor="gray.700" bg="gray.750">
-          <Flex align="center" gap={2} mb={2}>
-            <Text fontSize="sm" color="gray.400">
-              {message.is_improvement ? 'Improving:' : 'Replying to:'}
+      <Box 
+        className="bg-gray-800 rounded-lg shadow-xl w-full max-w-2xl"
+        maxH="90vh"
+        display="flex"
+        flexDirection="column"
+        overflow="hidden" // Prevent outer box from scrolling
+      >
+        {/* Header - Static */}
+        <Box flexShrink={0}>
+          <Flex p={4} borderBottom="1px" borderColor="gray.700" justify="space-between" align="center">
+            <Text fontSize="lg" fontWeight="semibold" color="white">
+              {message.is_improvement ? 'AI Message Improvements' : 'AI Reply Suggestions'}
             </Text>
-            {!message.draft && (
-              <Text fontSize="sm" color="blue.300">
-                {new Date(message.created_at).toLocaleTimeString([], {
-                  hour: '2-digit',
-                  minute: '2-digit',
-                  hour12: false
-                })}
-              </Text>
-            )}
+            <IconButton
+              icon={<CloseIcon />}
+              size="sm"
+              variant="ghost"
+              colorScheme="whiteAlpha"
+              onClick={onClose}
+            />
           </Flex>
-          <Box 
-            bg="gray.700" 
-            p={3} 
-            borderRadius="md"
-            borderLeft="4px solid"
-            borderLeftColor="blue.400"
-          >
-            <Text color="white" whiteSpace="pre-wrap">
-              {typeof message === 'string' ? message : message.content}
-            </Text>
+        </Box>
+
+        {/* Original Message - Static */}
+        <Box flexShrink={0}>
+          <Box p={4} borderBottom="1px" borderColor="gray.700" bg="gray.750">
+            <Flex align="center" gap={2} mb={2}>
+              <Text fontSize="sm" color="gray.400">
+                {message.is_improvement ? 'Improving:' : 'Replying to:'}
+              </Text>
+              {!message.draft && (
+                <Text fontSize="sm" color="blue.300">
+                  {new Date(message.created_at).toLocaleTimeString([], {
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    hour12: false
+                  })}
+                </Text>
+              )}
+            </Flex>
+            <Box 
+              bg="gray.700" 
+              p={3} 
+              borderRadius="md"
+              borderLeft="4px solid"
+              borderLeftColor="blue.400"
+            >
+              <Text color="white" whiteSpace="pre-wrap">
+                {typeof message === 'string' ? message : message.content}
+              </Text>
+            </Box>
           </Box>
         </Box>
 
-        {/* Options */}
-        <Box p={4} borderBottom="1px" borderColor="gray.700">
-          <Flex gap={4} mb={4}>
-            {/* Tone Selection */}
-            <Box flex="1">
-              <Text mb={1} fontSize="sm" fontWeight="medium" color="gray.300">
-                Tone
-              </Text>
-              <Select
-                value={selectedTone}
-                onChange={(e) => setSelectedTone(e.target.value)}
-                bg="gray.700"
-                borderColor="gray.600"
-                color="white"
-                _hover={{ borderColor: 'gray.500' }}
-              >
-                {TONE_OPTIONS.map(option => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </Select>
-            </Box>
+        {/* Options - Static */}
+        <Box flexShrink={0}>
+          <Box p={4} borderBottom="1px" borderColor="gray.700">
+            <Flex gap={4} mb={4}>
+              {/* Tone Selection */}
+              <Box flex="1">
+                <Text mb={1} fontSize="sm" fontWeight="medium" color="gray.300">
+                  Tone
+                </Text>
+                <Select
+                  value={selectedTone}
+                  onChange={(e) => setSelectedTone(e.target.value)}
+                  bg="gray.700"
+                  borderColor="gray.600"
+                  color="white"
+                  _hover={{ borderColor: 'gray.500' }}
+                >
+                  {TONE_OPTIONS.map(option => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </Select>
+              </Box>
 
-            {/* Length Selection */}
-            <Box flex="1">
-              <Text mb={1} fontSize="sm" fontWeight="medium" color="gray.300">
-                Length
-              </Text>
-              <Select
-                value={selectedLength}
-                onChange={(e) => setSelectedLength(e.target.value)}
-                bg="gray.700"
-                borderColor="gray.600"
-                color="white"
-                _hover={{ borderColor: 'gray.500' }}
-              >
-                {LENGTH_OPTIONS.map(option => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </Select>
-            </Box>
-          </Flex>
+              {/* Length Selection */}
+              <Box flex="1">
+                <Text mb={1} fontSize="sm" fontWeight="medium" color="gray.300">
+                  Length
+                </Text>
+                <Select
+                  value={selectedLength}
+                  onChange={(e) => setSelectedLength(e.target.value)}
+                  bg="gray.700"
+                  borderColor="gray.600"
+                  color="white"
+                  _hover={{ borderColor: 'gray.500' }}
+                >
+                  {LENGTH_OPTIONS.map(option => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </Select>
+              </Box>
+            </Flex>
 
-          <Button
-            onClick={generateSuggestions}
-            isLoading={isLoading}
-            width="full"
-            colorScheme="blue"
-            loadingText="Generating..."
-          >
-            {message.is_improvement ? 'Generate Improvements' : 'Generate Suggestions'}
-          </Button>
+            <Button
+              onClick={fetchSuggestions}
+              isLoading={isLoading}
+              width="full"
+              colorScheme="blue"
+              loadingText="Generating..."
+            >
+              {message.is_improvement ? 'Generate Improvements' : 'Generate Suggestions'}
+            </Button>
+          </Box>
         </Box>
 
-        {/* Suggestions */}
-        <Box p={4} maxH="96" overflowY="auto">
-          {error && (
-            <Alert status="error" mb={4} borderRadius="md">
-              <AlertIcon />
-              <Box flex="1">
-                <AlertTitle>Error</AlertTitle>
-                <AlertDescription display="block">
-                  {error}
-                </AlertDescription>
-              </Box>
-              <IconButton
-                icon={<RepeatIcon />}
-                onClick={generateSuggestions}
-                variant="ghost"
-                colorScheme="red"
-                size="sm"
-                ml={2}
-                isLoading={isLoading}
-                aria-label="Retry"
-              />
-            </Alert>
-          )}
-
-          {suggestions.length > 0 ? (
-            <Box className="space-y-4">
-              {suggestions.map((suggestion, index) => (
-                <Box
-                  key={index}
-                  borderWidth="1px"
-                  borderColor="gray.700"
-                  rounded="md"
-                  p={4}
-                  _hover={{ borderColor: 'blue.500' }}
-                  cursor="pointer"
-                  onClick={() => handleSelectReply(suggestion)}
-                >
-                  <Flex justify="space-between" align="center" mb={2}>
-                    <Flex gap={2}>
-                      <Text
-                        px={2}
-                        py={1}
-                        bg="gray.700"
-                        rounded="md"
-                        fontSize="xs"
-                        color="gray.300"
-                      >
-                        {suggestion.tone}
-                      </Text>
-                      <Text
-                        px={2}
-                        py={1}
-                        bg="gray.700"
-                        rounded="md"
-                        fontSize="xs"
-                        color="gray.300"
-                      >
-                        {suggestion.length}
-                      </Text>
-                    </Flex>
-                    <Button
-                      size="sm"
-                      colorScheme="blue"
-                      variant="ghost"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleSelectReply(suggestion);
-                      }}
-                    >
-                      Use This
-                    </Button>
-                  </Flex>
-                  <Text color="gray.100" whiteSpace="pre-wrap">
-                    {suggestion.text}
-                  </Text>
+        {/* Suggestions - Scrollable */}
+        <Box 
+          flex="1"
+          overflowY="auto"
+          minH="200px"
+          css={{
+            '&::-webkit-scrollbar': {
+              width: '8px',
+            },
+            '&::-webkit-scrollbar-track': {
+              background: 'var(--chakra-colors-gray-800)',
+            },
+            '&::-webkit-scrollbar-thumb': {
+              background: 'var(--chakra-colors-gray-600)',
+              borderRadius: '4px',
+            },
+            '&::-webkit-scrollbar-thumb:hover': {
+              background: 'var(--chakra-colors-gray-500)',
+            },
+          }}
+        >
+          <Box p={4} pb={8}> {/* Added bottom padding */}
+            {error && (
+              <Alert status="error" mb={4} borderRadius="md">
+                <AlertIcon />
+                <Box flex="1">
+                  <AlertTitle>Error</AlertTitle>
+                  <AlertDescription display="block">
+                    {error}
+                  </AlertDescription>
                 </Box>
-              ))}
-            </Box>
-          ) : !isLoading && !error && (
-            <Text textAlign="center" color="gray.400" py={8}>
-              Click "{message.is_improvement ? 'Generate Improvements' : 'Generate Suggestions'}" to get AI-powered {message.is_improvement ? 'message improvements' : 'reply suggestions'}
-            </Text>
-          )}
+                <IconButton
+                  icon={<RepeatIcon />}
+                  onClick={fetchSuggestions}
+                  variant="ghost"
+                  colorScheme="red"
+                  size="sm"
+                  ml={2}
+                  isLoading={isLoading}
+                  aria-label="Retry"
+                />
+              </Alert>
+            )}
+
+            {suggestions.length > 0 ? (
+              <VStack spacing={4} align="stretch">
+                {suggestions.map((suggestion, index) => (
+                  <Box
+                    key={index}
+                    borderWidth="1px"
+                    borderColor="gray.700"
+                    rounded="md"
+                    p={4}
+                    _hover={{ borderColor: 'blue.500' }}
+                    cursor="pointer"
+                    onClick={() => handleSelectReply(suggestion)}
+                    bg="gray.750"
+                  >
+                    <Flex justify="space-between" align="center" mb={2}>
+                      <Flex gap={2}>
+                        <Text
+                          px={2}
+                          py={1}
+                          bg="gray.700"
+                          rounded="md"
+                          fontSize="xs"
+                          color="gray.300"
+                        >
+                          {suggestion.tone}
+                        </Text>
+                        <Text
+                          px={2}
+                          py={1}
+                          bg="gray.700"
+                          rounded="md"
+                          fontSize="xs"
+                          color="gray.300"
+                        >
+                          {suggestion.length}
+                        </Text>
+                      </Flex>
+                      <Button
+                        size="sm"
+                        colorScheme="blue"
+                        variant="ghost"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleSelectReply(suggestion);
+                        }}
+                      >
+                        Use This
+                      </Button>
+                    </Flex>
+                    <Text color="gray.100" whiteSpace="pre-wrap">
+                      {suggestion.text}
+                    </Text>
+                  </Box>
+                ))}
+              </VStack>
+            ) : !isLoading && !error && (
+              <Text textAlign="center" color="gray.400" py={8}>
+                Click "{message.is_improvement ? 'Generate Improvements' : 'Generate Suggestions'}" to get AI-powered {message.is_improvement ? 'message improvements' : 'reply suggestions'}
+              </Text>
+            )}
+          </Box>
         </Box>
       </Box>
     </div>

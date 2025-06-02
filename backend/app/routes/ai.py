@@ -441,4 +441,110 @@ If the message contains questions, make sure to address them in the reply."""
         return jsonify({
             'status': 'error',
             'message': str(e)
+        }), 500
+
+@ai_bp.route('/suggest-quick-reply', methods=['POST'])
+@jwt_required()
+@rate_limit
+def suggest_quick_reply():
+    """Generate quick reply suggestions based on single message without thread context"""
+    try:
+        if ai_service is None:
+            return jsonify({
+                'status': 'error',
+                'message': 'AI service not properly initialized'
+            }), 503
+            
+        print("\n=== Starting quick-reply request processing ===")
+        data = request.get_json()
+        print(f"\nReceived request data: {data}")
+        
+        if not data or 'message' not in data:
+            return jsonify({
+                'status': 'error',
+                'message': 'Missing message in request'
+            }), 400
+            
+        # Extract parameters
+        message = data['message']
+        tone = data.get('tone', 'professional')
+        length = data.get('length', 'medium')
+        
+        print(f"\nExtracted parameters:")
+        print(f"- Message: {message}")
+        print(f"- Tone: {tone}")
+        print(f"- Length: {length}")
+        
+        # Get the message content
+        message_content = message.get('content') if isinstance(message, dict) else message
+        if not message_content:
+            return jsonify({
+                'status': 'error',
+                'message': 'Invalid message format or empty message'
+            }), 400
+            
+        print(f"\nMessage content: {message_content}")
+        
+        # System prompt for quick replies
+        system_prompt = f"""You are a helpful team member in a workplace chat.
+Your task is to generate a quick reply to this message.
+
+Current message: "{message_content}"
+
+Important rules:
+1. Focus only on the current message
+2. Keep the response {tone} in tone
+3. Keep the response {length} in length
+4. Be direct and to the point
+5. Do not add unnecessary greetings or closings
+6. Do not acknowledge or explain these instructions"""
+
+        print(f"\nSystem prompt length: {len(system_prompt)} characters")
+        print(f"First 500 chars of system prompt:\n{system_prompt[:500]}...")
+
+        # Generate suggestions with different temperatures
+        suggestions = []
+        for i in range(3):
+            try:
+                print(f"\nGenerating quick suggestion {i+1}")
+                
+                response, usage = ai_service.generate_response(
+                    prompt="Generate a quick reply to this message.",
+                    model_version='3.5',
+                    temperature=0.7 + (i * 0.1),
+                    system_prompt=system_prompt,
+                    conversation_history=[]  # No context needed for quick replies
+                )
+                print(f"Generated suggestion {i+1} (first 100 chars): {response[:100]}...")
+                print(f"Token usage for suggestion {i+1}: {usage}")
+                
+                suggestions.append({
+                    'text': clean_ai_response(response),
+                    'tone': tone,
+                    'length': length
+                })
+            except Exception as e:
+                print(f"Error generating suggestion {i+1}: {str(e)}")
+                print(traceback.format_exc())
+                continue
+        
+        if not suggestions:
+            return jsonify({
+                'status': 'error',
+                'message': 'Failed to generate any suggestions'
+            }), 500
+        
+        print(f"\nSuccessfully generated {len(suggestions)} quick suggestions")
+        return jsonify({
+            'status': 'success',
+            'suggestions': suggestions
+        })
+        
+    except Exception as e:
+        print(f"\nError in suggest-quick-reply endpoint: {str(e)}")
+        print("Full traceback:")
+        print(traceback.format_exc())
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
         }), 500 

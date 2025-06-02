@@ -418,21 +418,23 @@ const ThreadPanel = ({
   };
 
   const handleSuggestReply = (message) => {
-    // When in thread, directly show AI composer for a quick reply
+    // For quick replies without context
     setInternalSelectedMessage({
       ...message,
-      is_improvement: false, // This is a reply, not an improvement
-      useFullContext: false // Don't use thread context
+      is_improvement: false,
+      useFullContext: false,
+      isQuickReply: true // New flag to indicate quick reply
     });
     setInternalShowAIComposer(true);
   };
 
-  const handleSuggestReplyWithContext = (message) => {
-    // When in thread, show AI composer with full context
+  const handleSuggestContextualReply = (message) => {
+    // For replies with full thread context
     setInternalSelectedMessage({
       ...message,
-      is_improvement: false, // This is a reply, not an improvement
-      useFullContext: true // Use full thread context
+      is_improvement: false,
+      useFullContext: true,
+      isQuickReply: false
     });
     setInternalShowAIComposer(true);
   };
@@ -520,16 +522,16 @@ const ThreadPanel = ({
                           _hover={{ bg: 'gray.700' }}
                           color="white"
                         >
-                          Quick Reply Suggestion
+                          Quick Reply
                         </MenuItem>
                         <MenuItem
                           icon={<AiOutlineRobot />}
-                          onClick={() => handleSuggestReplyWithContext(message)}
+                          onClick={() => handleSuggestContextualReply(message)}
                           bg="gray.800"
                           _hover={{ bg: 'gray.700' }}
                           color="white"
                         >
-                          Contextual Reply Suggestion
+                          Contextual Reply
                         </MenuItem>
                       </>
                     )}
