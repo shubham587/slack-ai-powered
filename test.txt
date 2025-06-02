@@ -1,1 +1,30 @@
 Test file content
+9945
+mongodb+srv://shubhampwr9945:9945@cluster0.jpfaarf.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0
+
+Example Message: "Hey team, I've just pushed some updates to the main branch. Could someone review the changes?"
+
+Test with:
+1. Professional Tone:
+   - Should generate formal responses like:
+   "I'll review the changes in the main branch right away and provide feedback on your updates."
+
+2. Casual Tone:
+   - Should generate relaxed responses like:
+   "Sure thing! I'll take a look at those changes now 👍"
+
+3. Friendly Tone:
+   - Should generate warm responses like:
+   "Of course! Happy to help review your updates! I'll check them out and get back to you soon 😊"
+
+Example Message: "The client meeting went well. They loved our new design proposal."
+
+Test with:
+1. Short Length:
+   - "Great news! Glad to hear it was successful!"
+
+2. Medium Length:
+   - "That's excellent feedback! It's wonderful that they appreciated our design approach. This positions us well for the next phase."
+
+3. Long Length:
+   - "This is fantastic news! I'm really pleased to hear that the client responded positively to our design proposal. Their enthusiasm validates all the hard work our team put into the conceptualization and presentation. Should we schedule a team meeting to discuss the next steps and timeline?"
