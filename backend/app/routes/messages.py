@@ -26,8 +26,11 @@ def get_channel_messages(channel_id):
             # Convert channel_id to ObjectId since that's how it's stored
             channel_id_obj = ObjectId(channel_id)
             
-            # Build query
-            query = {'channel_id': channel_id_obj}
+            # Build query - only get main messages, not thread replies
+            query = {
+                'channel_id': channel_id_obj,
+                'parent_id': None  # Only get main messages, not replies
+            }
             if before:
                 query['created_at'] = {'$lt': datetime.fromisoformat(before)}
             
@@ -121,13 +124,11 @@ def send_message(channel_id):
                 # Emit to channel room
                 print(f"Emitting message to channel room: {channel_id}")
                 socketio.emit('message_created', message_data, room=str(channel_id))
-                socketio.emit('new_message', message_data, room=str(channel_id))
                 
                 # Also emit to each member's personal room
                 print(f"Emitting message to member rooms: {[str(m) for m in channel.members]}")
                 for member_id in channel.members:
                     socketio.emit('message_created', message_data, room=str(member_id))
-                    socketio.emit('new_message', message_data, room=str(member_id))
                 
                 return jsonify(message_data), 201
                 
@@ -165,13 +166,11 @@ def send_message(channel_id):
                 # Emit to channel room
                 print(f"Emitting message to channel room: {channel_id}")
                 socketio.emit('message_created', message_data, room=str(channel_id))
-                socketio.emit('new_message', message_data, room=str(channel_id))
                 
                 # Also emit to each member's personal room
                 print(f"Emitting message to member rooms: {[str(m) for m in channel.members]}")
                 for member_id in channel.members:
                     socketio.emit('message_created', message_data, room=str(member_id))
-                    socketio.emit('new_message', message_data, room=str(member_id))
                 
                 return jsonify(message_data), 201
                 
@@ -462,7 +461,7 @@ def send_direct_message(user_id):
         # Emit message to both users
         message_data = message.to_response_dict()
         for member_id in channel.members:
-            socketio.emit('new_message', message_data, room=str(member_id))
+            socketio.emit('message_created', message_data, room=str(member_id))
         
         return jsonify(message_data), 201
         

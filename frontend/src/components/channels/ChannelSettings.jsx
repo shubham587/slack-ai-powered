@@ -29,11 +29,12 @@ import {
   Flex,
   Avatar,
   Spinner,
+  useColorMode,
 } from '@chakra-ui/react';
 import { DeleteIcon } from '@chakra-ui/icons';
 import {
-  updateChannel,
-  addChannelMember,
+  updateChannelDetails,
+  addMemberToChannel,
   removeChannelMember,
   selectChannelById,
 } from '../../store/slices/channelsSlice';
@@ -41,10 +42,10 @@ import { createInvitation } from '../../store/slices/invitationsSlice';
 import axios from 'axios';
 import { useDebounce } from '../../hooks/useDebounce';
 
-const ChannelSettings = ({ isOpen, onClose, channelId }) => {
+const ChannelSettings = ({ isOpen, onClose, channel }) => {
   const dispatch = useDispatch();
   const toast = useToast();
-  const channel = useSelector(state => selectChannelById(state, channelId));
+  const { colorMode } = useColorMode();
   
   const [formData, setFormData] = useState({
     name: '',
@@ -76,7 +77,7 @@ const ChannelSettings = ({ isOpen, onClose, channelId }) => {
   // Update search effect to use debouncedSearchTerm
   useEffect(() => {
     const searchUsers = async () => {
-      if (!debouncedSearchTerm || !channelId) {
+      if (!debouncedSearchTerm || !channel?.id) {
         setSearchResults([]);
         return;
       }
@@ -99,7 +100,7 @@ const ChannelSettings = ({ isOpen, onClose, channelId }) => {
         
         // Get pending invitations for this channel
         const invitationsResponse = await axios.get(
-          `${baseUrl}/api/invitations/channel/${channelId}/pending`,
+          `${baseUrl}/api/invitations/channel/${channel.id}/pending`,
           {
             headers: {
               'Authorization': `Bearer ${token}`,
@@ -159,7 +160,7 @@ const ChannelSettings = ({ isOpen, onClose, channelId }) => {
     };
 
     searchUsers();
-  }, [debouncedSearchTerm, channelId, channel?.id]); // Only depend on necessary values
+  }, [debouncedSearchTerm, channel?.id, toast]);
 
   const handleChange = (e) => {
     const { name, value, checked } = e.target;
@@ -178,8 +179,8 @@ const ChannelSettings = ({ isOpen, onClose, channelId }) => {
         throw new Error('Channel name is required');
       }
       
-      await dispatch(updateChannel({
-        channelId,
+      await dispatch(updateChannelDetails({
+        channelId: channel.id,
         data: formData,
       })).unwrap();
       
@@ -208,7 +209,7 @@ const ChannelSettings = ({ isOpen, onClose, channelId }) => {
   const handleRemoveMember = async (userId) => {
     try {
       await dispatch(removeChannelMember({
-        channelId,
+        channelId: channel.id,
         userId,
       })).unwrap();
       
@@ -232,9 +233,9 @@ const ChannelSettings = ({ isOpen, onClose, channelId }) => {
 
   const handleInviteUser = async (userId) => {
     try {
-      console.log('Inviting user to channel:', { userId, channelId });
+      console.log('Inviting user to channel:', { userId, channelId: channel.id });
       await dispatch(createInvitation({
-        channelId,
+        channelId: channel.id,
         userId
       })).unwrap();
 
@@ -270,7 +271,7 @@ const ChannelSettings = ({ isOpen, onClose, channelId }) => {
   return (
     <Modal isOpen={isOpen} onClose={onClose} size="xl">
       <ModalOverlay />
-      <ModalContent bg="gray.800" color="white">
+      <ModalContent bg={colorMode === 'dark' ? 'gray.800' : 'white'} color={colorMode === 'dark' ? 'white' : 'black'}>
         <ModalHeader>Channel Settings - #{channel.name}</ModalHeader>
         <ModalCloseButton />
         
@@ -294,7 +295,11 @@ const ChannelSettings = ({ isOpen, onClose, channelId }) => {
                         value={formData.name}
                         onChange={handleChange}
                         placeholder="e.g. project-updates"
-                        _placeholder={{ color: 'gray.500' }}
+                        _placeholder={{ color: colorMode === 'dark' ? 'gray.500' : 'gray.400' }}
+                        bg={colorMode === 'dark' ? 'gray.700' : 'white'}
+                        borderColor={colorMode === 'dark' ? 'gray.600' : 'gray.300'}
+                        _hover={{ borderColor: colorMode === 'dark' ? 'gray.500' : 'gray.400' }}
+                        _focus={{ borderColor: 'blue.500', boxShadow: 'none' }}
                       />
                     </FormControl>
                     
@@ -305,7 +310,11 @@ const ChannelSettings = ({ isOpen, onClose, channelId }) => {
                         value={formData.description}
                         onChange={handleChange}
                         placeholder="What's this channel about?"
-                        _placeholder={{ color: 'gray.500' }}
+                        _placeholder={{ color: colorMode === 'dark' ? 'gray.500' : 'gray.400' }}
+                        bg={colorMode === 'dark' ? 'gray.700' : 'white'}
+                        borderColor={colorMode === 'dark' ? 'gray.600' : 'gray.300'}
+                        _hover={{ borderColor: colorMode === 'dark' ? 'gray.500' : 'gray.400' }}
+                        _focus={{ borderColor: 'blue.500', boxShadow: 'none' }}
                       />
                     </FormControl>
                     
@@ -316,7 +325,11 @@ const ChannelSettings = ({ isOpen, onClose, channelId }) => {
                         value={formData.topic}
                         onChange={handleChange}
                         placeholder="Set a topic for this channel"
-                        _placeholder={{ color: 'gray.500' }}
+                        _placeholder={{ color: colorMode === 'dark' ? 'gray.500' : 'gray.400' }}
+                        bg={colorMode === 'dark' ? 'gray.700' : 'white'}
+                        borderColor={colorMode === 'dark' ? 'gray.600' : 'gray.300'}
+                        _hover={{ borderColor: colorMode === 'dark' ? 'gray.500' : 'gray.400' }}
+                        _focus={{ borderColor: 'blue.500', boxShadow: 'none' }}
                       />
                     </FormControl>
                     
@@ -328,6 +341,7 @@ const ChannelSettings = ({ isOpen, onClose, channelId }) => {
                         name="is_private"
                         isChecked={formData.is_private}
                         onChange={handleChange}
+                        colorScheme="blue"
                       />
                     </FormControl>
                   </VStack>
@@ -350,7 +364,7 @@ const ChannelSettings = ({ isOpen, onClose, channelId }) => {
                       key={member.id}
                       p={2}
                       borderRadius="md"
-                      bg="gray.700"
+                      bg={colorMode === 'dark' ? 'gray.700' : 'gray.100'}
                     >
                       <Flex align="center" justify="space-between">
                         <Flex align="center">
@@ -395,13 +409,14 @@ const ChannelSettings = ({ isOpen, onClose, channelId }) => {
                       value={searchTerm}
                       onChange={(e) => setSearchTerm(e.target.value)}
                       placeholder="Search users to invite..."
-                      bg="gray.700"
+                      bg={colorMode === 'dark' ? 'gray.700' : 'white'}
                       border="1px"
-                      borderColor="gray.600"
-                      _hover={{ borderColor: 'gray.500' }}
+                      borderColor={colorMode === 'dark' ? 'gray.600' : 'gray.300'}
+                      _hover={{ borderColor: colorMode === 'dark' ? 'gray.500' : 'gray.400' }}
                       _focus={{ borderColor: 'blue.500', boxShadow: 'none' }}
                     />
                   </FormControl>
+
                   {isSearching ? (
                     <Flex justify="center" py={4}>
                       <Spinner color="blue.400" />
@@ -412,7 +427,7 @@ const ChannelSettings = ({ isOpen, onClose, channelId }) => {
                         <ListItem
                           key={user.id}
                           p={2}
-                          bg="gray.700"
+                          bg={colorMode === 'dark' ? 'gray.700' : 'gray.100'}
                           borderRadius="md"
                         >
                           <Flex justify="space-between" align="center">

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Box,
   Flex,
@@ -15,6 +15,14 @@ import {
   useToast,
   Button,
   Tooltip,
+  useColorModeValue,
+  useColorMode,
+  Input,
+  Spinner,
+  Alert,
+  AlertIcon,
+  AlertTitle,
+  AlertDescription,
 } from '@chakra-ui/react';
 import { CloseIcon, EditIcon, DeleteIcon, ChatIcon } from '@chakra-ui/icons';
 import { BsThreeDotsVertical } from 'react-icons/bs';
@@ -45,11 +53,14 @@ const ThreadPanel = ({
   const [internalSelectedMessage, setInternalSelectedMessage] = useState(null);
   const [internalShowAIComposer, setInternalShowAIComposer] = useState(false);
   const [replyingTo, setReplyingTo] = useState(null);
-  const [width, setWidth] = useState(DEFAULT_WIDTH);
-  const [isResizing, setIsResizing] = useState(false);
   const [showNotesModal, setShowNotesModal] = useState(false);
+  const [messageInputValue, setMessageInputValue] = useState('');
   const toast = useToast();
   const currentUser = useSelector(selectUser);
+  const { colorMode } = useColorMode();
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const messagesEndRef = useRef(null);
 
   // Debug log current user
   useEffect(() => {
@@ -86,7 +97,6 @@ const ThreadPanel = ({
   useEffect(() => {
     if (selectedMessage) {
       console.log('ThreadPanel - Selected message for reply:', selectedMessage);
-      // Ensure we preserve useFullContext flag
       setInternalSelectedMessage({
         ...selectedMessage,
         useFullContext: selectedMessage.useFullContext === undefined ? true : selectedMessage.useFullContext
@@ -94,23 +104,20 @@ const ThreadPanel = ({
     }
   }, [selectedMessage]);
 
-  // Separate effect for loading replies and socket handling
+  // Effect to handle socket events for replies and load initial replies
   useEffect(() => {
     if (!parentMessage) return;
-
+    
     const messageId = parentMessage._id || parentMessage.id;
-    console.log('ThreadPanel - Loading replies for:', {
-      parentMessage,
-      messageId,
-      currentChannel
-    });
+    console.log('ThreadPanel - Setting up socket listeners and loading replies for:', messageId);
     
     // Track if component is mounted
     let isMounted = true;
     
-    // Load replies only once when parent message changes
+    // Load initial replies
     const loadInitialReplies = async () => {
       try {
+        setIsLoading(true);
         const token = localStorage.getItem('token');
         const response = await fetch(
           `${import.meta.env.VITE_API_URL || 'http://localhost:5001'}/api/messages/${messageId}/replies`,
@@ -126,7 +133,7 @@ const ThreadPanel = ({
         }
 
         const data = await response.json();
-        console.log('ThreadPanel - Received replies:', data);
+        console.log('ThreadPanel - Received initial replies:', data);
 
         // Only update state if component is still mounted
         if (isMounted) {
@@ -137,43 +144,38 @@ const ThreadPanel = ({
 
           console.log('ThreadPanel - Setting sorted replies:', sortedReplies);
           setReplies(sortedReplies);
-
-          // Update parent message reply count to match actual number of replies
-          if (onSendReply && parentMessage) {
-            const updatedParentMessage = {
-              ...parentMessage,
-              reply_count: sortedReplies.length
-            };
-            onSendReply(updatedParentMessage);
-          }
         }
       } catch (error) {
         console.error('Error loading replies:', error);
+        setError('Failed to load replies');
+      } finally {
+        setIsLoading(false);
       }
     };
 
+    // Load initial replies
     loadInitialReplies();
     
-    // Get socket instance
     const socket = getSocket();
     if (!socket) {
       console.error('Socket not initialized');
       return;
     }
 
-    // Join both thread-specific room and channel room
+    // Join thread room
     socket.emit('join_thread', { thread_id: messageId });
-    socket.emit('join', { channel: parentMessage.channel_id });
-    console.log('Joined thread room:', messageId, 'and channel:', parentMessage.channel_id);
+    console.log('Joined thread room:', messageId);
 
     // Handle new replies
     const handleNewReply = (data) => {
-      console.log('Received socket event - new reply:', data);
-      const parentId = data.parent_id || data.message_id;
-      const replyData = data.reply || data;
+      console.log('ThreadPanel - Received new reply:', data);
+      const parentId = data.parent_id;
       
       if (parentId === messageId) {
         setReplies(prev => {
+          // Extract the actual reply object from the data
+          const replyData = data.reply || data;
+          
           // Check if reply already exists
           const replyId = replyData._id || replyData.id;
           const exists = prev.some(reply => (reply._id || reply.id) === replyId);
@@ -183,75 +185,35 @@ const ThreadPanel = ({
             return prev;
           }
           
-          console.log('Adding new reply to state:', replyData);
-          const newReplies = [...prev, replyData].sort((a, b) => 
+          console.log('Adding new reply to thread');
+          return [...prev, replyData].sort((a, b) => 
             new Date(a.created_at) - new Date(b.created_at)
           );
-          return newReplies;
         });
-      }
-    };
 
-    // Handle message updates
-    const handleMessageUpdated = (data) => {
-      console.log('Received socket event - message updated:', data);
-      const updatedMessageId = data._id || data.id;
-      const messageId = parentMessage._id || parentMessage.id;
-      
-      // If this is the parent message being updated
-      if (updatedMessageId === messageId && onSendReply) {
-        onSendReply(data);
-      }
-      
-      // Update reply if it exists in the thread
-      setReplies(prev => prev.map(reply => {
-        const replyId = reply._id || reply.id;
-        return replyId === updatedMessageId ? data : reply;
-      }));
-    };
-
-    // Handle message deletions
-    const handleMessageDeleted = (data) => {
-      console.log('Received socket event - message deleted:', data);
-      const deletedMessageId = data.message_id;
-      
-      setReplies(prev => {
-        const newReplies = prev.filter(reply => {
-          const replyId = reply._id || reply.id;
-          return replyId !== deletedMessageId;
-        });
-        
         // Update parent message reply count
-        if (onSendReply && parentMessage) {
-          const updatedParentMessage = {
+        if (onSendReply) {
+          onSendReply({
             ...parentMessage,
-            reply_count: newReplies.length
-          };
-          onSendReply(updatedParentMessage);
+            reply_count: (parentMessage.reply_count || 0) + 1
+          });
         }
-        
-        return newReplies;
-      });
+      }
     };
 
     // Subscribe to socket events
     socket.on('new_reply', handleNewReply);
-    socket.on('message_created', handleNewReply); // Also listen for general messages
-    socket.on('message_updated', handleMessageUpdated);
-    socket.on('message_deleted', handleMessageDeleted);
+    socket.on('message_created', handleNewReply); // Also handle message_created events
 
     // Cleanup
     return () => {
       isMounted = false;
-      console.log('Cleaning up socket listeners');
+      console.log('Cleaning up socket listeners for thread:', messageId);
       socket.off('new_reply', handleNewReply);
       socket.off('message_created', handleNewReply);
-      socket.off('message_updated', handleMessageUpdated);
-      socket.off('message_deleted', handleMessageDeleted);
       socket.emit('leave_thread', { thread_id: messageId });
-      socket.emit('leave', { channel: parentMessage.channel_id });
     };
-  }, [parentMessage?._id || parentMessage?.id]); // Only depend on the message ID
+  }, [parentMessage?._id || parentMessage?.id]);
 
   const handleSendReply = async (messageData) => {
     try {
@@ -393,33 +355,37 @@ const ThreadPanel = ({
     }
   };
 
-  const handleSelectAIReply = async (replyText) => {
+  const handleAIReply = async (replyText) => {
     try {
-      console.log('Sending AI reply in thread:', replyText);
-      await handleSendReply({ content: replyText });
-      
-      // Clear replyingTo state after successful AI reply
-      setReplyingTo(null);
-      
-      // Close the AI composer
-      if (internalShowAIComposer) {
-        setInternalShowAIComposer(false);
-        setInternalSelectedMessage(null);
-      } else {
-        onAIComposerClose();
+      const token = localStorage.getItem('token');
+      const response = await fetch(
+        `${import.meta.env.VITE_API_URL || 'http://localhost:5001'}/api/messages/${parentMessage.id}/reply`,
+        {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ content: replyText })
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error('Failed to send reply');
       }
+
+      // Let the socket event handle adding the reply to the state
+      await response.json();
       
-      toast({
-        title: 'Reply sent in thread',
-        status: 'success',
-        duration: 2000,
-        isClosable: true,
-      });
+      // Update parent message and close composer
+      onSendReply(parentMessage);
+      onAIComposerClose();
+      scrollToBottom();
     } catch (error) {
       console.error('Error sending AI reply:', error);
       toast({
-        title: 'Error',
-        description: error.message || 'Failed to send reply',
+        title: 'Error sending reply',
+        description: error.message,
         status: 'error',
         duration: 3000,
         isClosable: true,
@@ -449,6 +415,18 @@ const ThreadPanel = ({
     setInternalShowAIComposer(true);
   };
 
+  // Add this new function to handle AI suggestion selection
+  const handleAISuggestionSelect = (suggestion) => {
+    console.log('Setting message input value to:', suggestion);
+    setMessageInputValue(suggestion);
+    if (internalShowAIComposer) {
+      setInternalShowAIComposer(false);
+      setInternalSelectedMessage(null);
+    } else {
+      onAIComposerClose();
+    }
+  };
+
   const formatTimestamp = (timestamp) => {
     // Create a date object from the UTC timestamp
     const date = new Date(timestamp);
@@ -464,34 +442,25 @@ const ThreadPanel = ({
   };
 
   const renderMessage = (message, isParent = false) => {
-    // Ensure we have a valid ID by checking both _id and id fields
     const messageId = message._id || message.id;
     if (!messageId) {
       console.error('Message without ID:', message);
-      return null; // Skip rendering messages without IDs
+      return null;
     }
 
     const isEditing = editingMessage && (editingMessage._id === messageId || editingMessage.id === messageId);
     const isOwn = isOwnMessage(message);
-    
-    console.log('Thread Panel - Rendering message:', {
-      messageId,
-      username: message.username,
-      isParent,
-      isOwn,
-      isEditing
-    });
 
     return (
       <Box
         key={`${isParent ? 'parent' : 'reply'}-${messageId}`}
         py={2}
         px={4}
-        bg={isParent ? 'gray.700' : 'transparent'}
+        bg={isParent ? (colorMode === 'dark' ? 'gray.700' : 'gray.100') : 'transparent'}
         borderRadius="md"
         position="relative"
         role="group"
-        _hover={{ bg: 'gray.750' }}
+        _hover={{ bg: isParent ? (colorMode === 'dark' ? 'gray.600' : 'gray.200') : (colorMode === 'dark' ? 'gray.700' : 'gray.100') }}
       >
         <Flex gap={3}>
           <Avatar
@@ -502,10 +471,10 @@ const ThreadPanel = ({
           <Box flex="1">
             <Flex align="center" justify="space-between" mb={1}>
               <Flex align="center" gap={2}>
-                <Text fontWeight="bold" color="white">
+                <Text fontWeight="bold" color={colorMode === 'dark' ? 'white' : 'gray.800'}>
                   {message.username}
                 </Text>
-                <Text fontSize="xs" color="gray.400">
+                <Text fontSize="xs" color={colorMode === 'dark' ? 'gray.400' : 'gray.600'}>
                   {formatTimestamp(message.created_at)}
                 </Text>
               </Flex>
@@ -518,55 +487,69 @@ const ThreadPanel = ({
                     icon={<BsThreeDotsVertical />}
                     variant="ghost"
                     size="sm"
-                    color="gray.400"
-                    _hover={{ color: 'white', bg: 'whiteAlpha.100' }}
+                    color={colorMode === 'dark' ? 'gray.400' : 'gray.600'}
+                    _hover={{ color: colorMode === 'dark' ? 'white' : 'gray.800' }}
                   />
-                  <MenuList bg="gray.800" borderColor="gray.700">
-                    {/* AI suggestion options for other users' messages */}
-                    {!isOwn && (
-                      <>
-                        <MenuItem
-                          icon={<AiOutlineRobot />}
-                          onClick={() => handleSuggestReply(message)}
-                          bg="gray.800"
-                          _hover={{ bg: 'gray.700' }}
-                          color="white"
-                        >
-                          Quick Reply
-                        </MenuItem>
-                        <MenuItem
-                          icon={<AiOutlineRobot />}
-                          onClick={() => handleSuggestContextualReply(message)}
-                          bg="gray.800"
-                          _hover={{ bg: 'gray.700' }}
-                          color="white"
-                        >
-                          Contextual Reply
-                        </MenuItem>
-                      </>
+                  <MenuList bg={colorMode === 'dark' ? 'gray.800' : 'white'} borderColor={colorMode === 'dark' ? 'gray.700' : 'gray.200'}>
+                    {/* Copy Message option for all messages */}
+                    <MenuItem
+                      onClick={() => {
+                        navigator.clipboard.writeText(message.content);
+                        toast({
+                          title: 'Message copied',
+                          status: 'success',
+                          duration: 2000,
+                          isClosable: true,
+                        });
+                      }}
+                      bg={colorMode === 'dark' ? 'gray.700' : 'gray.50'}
+                      _hover={{ bg: colorMode === 'dark' ? 'gray.600' : 'gray.100' }}
+                      color={colorMode === 'dark' ? 'white' : 'gray.800'}
+                    >
+                      Copy Message
+                    </MenuItem>
+
+                    {/* Suggest Reply option for other users' messages */}
+                    {message.sender_id !== currentUser?.id && (
+                      <MenuItem
+                        icon={<AiOutlineRobot />}
+                        onClick={() => {
+                          setInternalSelectedMessage({
+                            ...message,
+                            isQuickReply: true,
+                            useFullContext: false,
+                            inThread: true
+                          });
+                          setInternalShowAIComposer(true);
+                        }}
+                        bg={colorMode === 'dark' ? 'gray.700' : 'gray.50'}
+                        _hover={{ bg: colorMode === 'dark' ? 'gray.600' : 'gray.100' }}
+                        color={colorMode === 'dark' ? 'white' : 'gray.800'}
+                      >
+                        Suggest Reply
+                      </MenuItem>
                     )}
 
                     {/* Edit and Delete options for own messages */}
                     {isOwn && !isParent && (
                       <>
-                        <MenuDivider borderColor="gray.700" />
                         <MenuItem
                           icon={<EditIcon />}
                           onClick={() => {
                             console.log('Setting editing message:', message);
                             setEditingMessage(message);
                           }}
-                          bg="gray.800"
-                          _hover={{ bg: 'gray.700' }}
-                          color="white"
+                          bg={colorMode === 'dark' ? 'gray.700' : 'gray.50'}
+                          _hover={{ bg: colorMode === 'dark' ? 'gray.600' : 'gray.100' }}
+                          color={colorMode === 'dark' ? 'white' : 'gray.800'}
                         >
                           Edit Message
                         </MenuItem>
                         <MenuItem
                           icon={<DeleteIcon />}
                           onClick={() => handleDeleteMessage(messageId)}
-                          bg="gray.800"
-                          _hover={{ bg: 'gray.700' }}
+                          bg={colorMode === 'dark' ? 'gray.700' : 'gray.50'}
+                          _hover={{ bg: colorMode === 'dark' ? 'gray.600' : 'gray.100' }}
                           color="red.300"
                         >
                           Delete Message
@@ -586,9 +569,17 @@ const ThreadPanel = ({
                 placeholder="Edit your message..."
                 showAttachment={false}
                 onCancel={() => setEditingMessage(null)}
+                isEditing={true}
+                customStyles={{
+                  container: {
+                    bg: colorMode === 'dark' ? 'gray.700' : 'gray.100',
+                    borderRadius: 'md',
+                    p: 2
+                  }
+                }}
               />
             ) : (
-              <Text color="gray.100" whiteSpace="pre-wrap">
+              <Text color={colorMode === 'dark' ? 'white' : 'gray.800'} whiteSpace="pre-wrap">
                 {message.content}
               </Text>
             )}
@@ -598,86 +589,35 @@ const ThreadPanel = ({
     );
   };
 
-  // Handle mouse move during resize
-  useEffect(() => {
-    const handleMouseMove = (e) => {
-      if (!isResizing) return;
-      
-      // Calculate new width based on mouse position
-      const newWidth = window.innerWidth - e.clientX;
-      
-      // Clamp width between min and max values
-      const clampedWidth = Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, newWidth));
-      
-      setWidth(clampedWidth);
-    };
-
-    const handleMouseUp = () => {
-      setIsResizing(false);
-    };
-
-    if (isResizing) {
-      document.addEventListener('mousemove', handleMouseMove);
-      document.addEventListener('mouseup', handleMouseUp);
+  const scrollToBottom = () => {
+    if (messagesEndRef.current) {
+      messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
     }
-
-    return () => {
-      document.removeEventListener('mousemove', handleMouseMove);
-      document.removeEventListener('mouseup', handleMouseUp);
-    };
-  }, [isResizing]);
+  };
 
   return (
     <Flex
       direction="column"
       h="100vh"
-      w={`${width}px`}
-      bg="gray.800"
+      w="40%"
+      bg={colorMode === 'dark' ? 'gray.800' : 'white'}
       position="fixed"
       right={0}
       top={0}
       zIndex={20}
       borderLeft="1px solid"
-      borderColor="gray.700"
-      transition="width 0.2s"
-      _hover={{
-        '& .resize-handle': {
-          opacity: 1
-        }
-      }}
+      borderColor={colorMode === 'dark' ? 'gray.700' : 'gray.200'}
     >
-      {/* Resize Handle */}
-      <Box
-        className="resize-handle"
-        position="absolute"
-        left={-2}
-        top={0}
-        w={4}
-        h="100%"
-        cursor="ew-resize"
-        opacity={0}
-        _hover={{ opacity: 1 }}
-        transition="opacity 0.2s"
-        onMouseDown={() => setIsResizing(true)}
-      >
-        <Box
-          w={1}
-          h="100%"
-          bg="blue.500"
-          mx="auto"
-          opacity={isResizing ? 1 : 0.5}
-        />
-      </Box>
-
       {/* Header */}
       <Flex 
         p={4} 
         borderBottom="1px" 
-        borderColor="gray.700" 
+        borderColor={colorMode === 'dark' ? 'gray.700' : 'gray.200'} 
         align="center" 
         justify="space-between"
+        bg={colorMode === 'dark' ? 'gray.800' : 'gray.50'}
       >
-        <Text fontSize="lg" fontWeight="semibold" color="white">
+        <Text fontSize="lg" fontWeight="semibold" color={colorMode === 'dark' ? 'white' : 'gray.800'}>
           Thread
         </Text>
         <Flex gap={2}>
@@ -694,19 +634,21 @@ const ThreadPanel = ({
             icon={<CloseIcon />}
             onClick={onClose}
             variant="ghost"
-            colorScheme="whiteAlpha"
             size="sm"
+            color={colorMode === 'dark' ? 'gray.400' : 'gray.600'}
+            _hover={{ color: colorMode === 'dark' ? 'white' : 'gray.800', bg: colorMode === 'dark' ? 'whiteAlpha.200' : 'gray.100' }}
           />
         </Flex>
       </Flex>
 
-      <VStack spacing={4} align="stretch" flex="1" overflowY="auto" p={4}>
+      {/* Messages Area */}
+      <VStack spacing={4} align="stretch" flex="1" overflowY="auto" p={4} bg={colorMode === 'dark' ? 'gray.900' : 'white'} className="custom-scrollbar">
         {parentMessage && renderMessage(parentMessage, true)}
         
         {replies.length > 0 && (
           <>
-            <Divider borderColor="gray.700" />
-            <Text color="gray.400" fontSize="sm" px={4}>
+            <Divider borderColor={colorMode === 'dark' ? 'gray.700' : 'gray.200'} />
+            <Text color={colorMode === 'dark' ? 'gray.400' : 'gray.600'} fontSize="sm" px={4}>
               {replies.length} {replies.length === 1 ? 'reply' : 'replies'}
             </Text>
           </>
@@ -724,64 +666,18 @@ const ThreadPanel = ({
             </Box>
           );
         })}
+        <div ref={messagesEndRef} />
       </VStack>
 
-      {/* Message Input Area */}
+      {/* Message Input */}
       <Box 
         p={4} 
         borderTop="1px" 
-        borderColor="gray.700"
-        bg="gray.800"
-        position="relative"
+        borderColor={colorMode === 'dark' ? 'gray.700' : 'gray.200'}
+        bg={colorMode === 'dark' ? 'gray.800' : 'white'}
+        maxH="300px"
+        overflowY="auto"
       >
-        {/* Quick Reply Button */}
-        <Flex justify="center" mb={4}>
-          <Tooltip
-            label={`AI will analyze the entire thread (${replies.length + 1} messages) to generate a contextually relevant reply`}
-            placement="top"
-            hasArrow
-          >
-            <Button
-              leftIcon={<AiOutlineRobot />}
-              onClick={() => {
-                // Create message object with thread context
-                const messageWithContext = {
-                  ...parentMessage,
-                  is_improvement: false,
-                  useFullContext: true
-                };
-                
-                console.log('ThreadPanel - AI Reply Button Clicked:', {
-                  messageWithContext,
-                  parentMessage,
-                  replies,
-                  fullContext: [parentMessage, ...replies].map(msg => ({
-                    id: msg._id || msg.id,
-                    content: msg.content,
-                    username: msg.username,
-                    created_at: msg.created_at
-                  }))
-                });
-                
-                setInternalSelectedMessage(messageWithContext);
-                setInternalShowAIComposer(true);
-              }}
-              variant="outline"
-              colorScheme="blue"
-              size="sm"
-              width="auto"
-              display="flex"
-              alignItems="center"
-              gap={2}
-            >
-              <Box>
-                <Text>Get AI Reply Suggestion</Text>
-                {/* <Text fontSize="xs" color="blue.200">Using {replies.length + 1} messages as context</Text> */}
-              </Box>
-            </Button>
-          </Tooltip>
-        </Flex>
-
         <MessageInput
           onSendMessage={handleSendReply}
           currentChannel={currentChannel}
@@ -789,15 +685,19 @@ const ThreadPanel = ({
           showAttachment={false}
           replyingTo={replyingTo}
           onCancel={() => setReplyingTo(null)}
+          value={messageInputValue}
+          onChange={setMessageInputValue}
           customStyles={{
             container: {
-              bg: 'gray.700',
+              bg: colorMode === 'dark' ? 'gray.700' : 'gray.100',
               borderRadius: 'md',
-              p: 2
+              p: 2,
+              minH: '40px',
+              maxH: '200px'
             },
             input: {
-              color: 'white',
-              _placeholder: { color: 'gray.400' }
+              color: colorMode === 'dark' ? 'white' : 'gray.800',
+              _placeholder: { color: colorMode === 'dark' ? 'gray.400' : 'gray.500' }
             },
             sendButton: {
               colorScheme: 'blue',
@@ -817,38 +717,18 @@ const ThreadPanel = ({
       {(showAIComposer || internalShowAIComposer) && (selectedMessage || internalSelectedMessage) && (
         <AutoReplyComposer
           message={selectedMessage || internalSelectedMessage}
-          threadContext={(() => {
-            // Get all messages in chronological order, including the parent message
-            const allMessages = [parentMessage, ...replies].sort(
-              (a, b) => new Date(a.created_at) - new Date(b.created_at)
-            ).map(msg => ({
-              content: msg.content,
-              username: msg.username,
-              created_at: msg.created_at,
-              sender_id: msg.sender_id,
-              id: msg._id || msg.id,
-              channel_id: msg.channel_id,
-              is_direct: msg.is_direct
-            }));
-            
-            // Log the full context details
-            console.log('ThreadPanel - Full Context Details:', {
-              contextLength: allMessages.length,
-              fullContextList: allMessages,
-              parentMessage: {
-                id: parentMessage._id || parentMessage.id,
-                content: parentMessage.content,
-                username: parentMessage.username,
-                created_at: parentMessage.created_at,
-                sender_id: parentMessage.sender_id
-              },
-              repliesCount: replies.length,
-              targetMessage: selectedMessage || internalSelectedMessage
-            });
-            
-            return allMessages;
-          })()}
-          onSelectReply={handleSelectAIReply}
+          threadContext={[parentMessage, ...replies].sort(
+            (a, b) => new Date(a.created_at) - new Date(b.created_at)
+          ).map(msg => ({
+            content: msg.content,
+            username: msg.username,
+            created_at: msg.created_at,
+            sender_id: msg.sender_id,
+            id: msg._id || msg.id,
+            channel_id: msg.channel_id,
+            is_direct: msg.is_direct
+          }))}
+          onSelectReply={handleAISuggestionSelect}
           onClose={() => {
             if (internalShowAIComposer) {
               setInternalShowAIComposer(false);
@@ -864,7 +744,7 @@ const ThreadPanel = ({
       <NotesModal
         isOpen={showNotesModal}
         onClose={() => setShowNotesModal(false)}
-        channelId={currentChannel?.id}
+        channelId={currentChannel?._id}
         threadId={parentMessage?._id || parentMessage?.id}
         channelName={currentChannel?.name}
         threadTitle={parentMessage?.content}

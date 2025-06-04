@@ -86,18 +86,19 @@ class Channel:
             if not user1 or not user2:
                 raise ValueError('One or both users not found')
             
-            # Create channel name from display names or usernames
+            # Create consistent channel name using both users' display names
             user1_name = user1.get('display_name', user1['username'])
             user2_name = user2.get('display_name', user2['username'])
-            channel_name = f"DM: {user1_name} & {user2_name}"
+            channel_name = f"{user1_name} & {user2_name}"
                 
-            # Create new DM channel
+            # Create new DM channel with both users as members
             return Channel.create(
                 name=channel_name,
                 created_by=member_ids[0],
                 is_direct=True,
                 is_private=True,
-                members=member_ids
+                members=member_ids,  # Include both users in members array
+                description=f"Direct message between {user1_name} and {user2_name}"
             )
         except Exception as e:
             print(f"Error creating DM channel: {str(e)}")

@@ -23,10 +23,12 @@ import {
   Spinner,
   Alert,
   AlertIcon,
+  InputGroup,
+  InputLeftElement,
 } from '@chakra-ui/react';
 import { SearchIcon } from '@chakra-ui/icons';
 
-const DirectMessage = ({ isOpen, onClose, onSelectUser }) => {
+const DirectMessage = ({ isOpen, onClose, onSelect }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [debouncedSearchTerm] = useDebounce(searchTerm, 300);
   const [searchResults, setSearchResults] = useState([]);
@@ -120,31 +122,15 @@ const DirectMessage = ({ isOpen, onClose, onSelectUser }) => {
 
   const handleUserSelect = async (selectedUser) => {
     try {
-      const token = localStorage.getItem('token');
-      
-      if (!token) {
-        throw new Error('No authentication token found');
+      if (onSelect) {
+        await onSelect(selectedUser);
       }
-
-      const response = await axios.post(
-        `${API_URL}/api/channels/dm/${selectedUser.id}`,
-        {},
-        {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          }
-        }
-      );
-
-      console.log('DM channel created:', response.data);
-      onSelectUser(selectedUser, response.data.id);
       onClose();
     } catch (error) {
       console.error('Error creating DM channel:', error);
       toast({
         title: 'Error',
-        description: 'Failed to create direct message channel',
+        description: 'Failed to create DM channel',
         status: 'error',
         duration: 3000,
         isClosable: true,
@@ -155,25 +141,35 @@ const DirectMessage = ({ isOpen, onClose, onSelectUser }) => {
   return (
     <Modal isOpen={isOpen} onClose={onClose}>
       <ModalOverlay />
-      <ModalContent>
-        <ModalHeader>Direct Messages</ModalHeader>
-        <ModalCloseButton />
-        <ModalBody pb={6}>
-          <Input
-            placeholder="Search users..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            mb={4}
-          />
+      <ModalContent bg="gray.800" color="white">
+        <ModalHeader borderBottom="1px" borderColor="gray.700">Direct Messages</ModalHeader>
+        <ModalCloseButton color="gray.400" />
+        <ModalBody py={6}>
+          <InputGroup mb={4}>
+            <InputLeftElement pointerEvents="none">
+              <SearchIcon color="gray.400" />
+            </InputLeftElement>
+            <Input
+              placeholder="Search users..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              bg="gray.700"
+              border="1px"
+              borderColor="gray.600"
+              _placeholder={{ color: 'gray.400' }}
+              _hover={{ borderColor: 'gray.500' }}
+              _focus={{ borderColor: 'blue.500', boxShadow: 'none' }}
+            />
+          </InputGroup>
           
           {isLoading && (
             <Flex justify="center" my={4}>
-              <Spinner />
+              <Spinner color="blue.500" />
             </Flex>
           )}
 
           {error && (
-            <Alert status="error" mb={4}>
+            <Alert status="error" mb={4} bg="red.900" color="white">
               <AlertIcon />
               {error}
             </Alert>
@@ -187,14 +183,15 @@ const DirectMessage = ({ isOpen, onClose, onSelectUser }) => {
                     key={user.id}
                     p={2}
                     cursor="pointer"
-                    _hover={{ bg: 'gray.100' }}
+                    _hover={{ bg: 'gray.700' }}
                     onClick={() => handleUserSelect(user)}
+                    borderRadius="md"
                   >
                     <Flex align="center">
                       <Avatar size="sm" name={user.username} src={user.avatar_url} />
                       <Box ml={3}>
-                        <Text fontWeight="bold">{user.display_name || user.username}</Text>
-                        <Text fontSize="sm" color="gray.500">@{user.username}</Text>
+                        <Text fontWeight="bold" color="white">{user.display_name || user.username}</Text>
+                        <Text fontSize="sm" color="gray.400">@{user.username}</Text>
                       </Box>
                     </Flex>
                   </ListItem>
@@ -202,21 +199,22 @@ const DirectMessage = ({ isOpen, onClose, onSelectUser }) => {
               </List>
             ) : (
               <>
-                <Text fontWeight="bold" mb={2}>Recent Chats</Text>
+                <Text fontWeight="bold" mb={2} color="gray.300">Recent Chats</Text>
                 <List spacing={3}>
                   {recentChats.map((chat) => (
                     <ListItem
                       key={chat.channel_id}
                       p={2}
                       cursor="pointer"
-                      _hover={{ bg: 'gray.100' }}
+                      _hover={{ bg: 'gray.700' }}
                       onClick={() => handleUserSelect(chat.user)}
+                      borderRadius="md"
                     >
                       <Flex align="center">
                         <Avatar size="sm" name={chat.user.username} src={chat.user.avatar_url} />
                         <Box ml={3}>
-                          <Text fontWeight="bold">{chat.user.display_name || chat.user.username}</Text>
-                          <Text fontSize="sm" color="gray.500">
+                          <Text fontWeight="bold" color="white">{chat.user.display_name || chat.user.username}</Text>
+                          <Text fontSize="sm" color="gray.400">
                             {chat.last_message
                               ? chat.last_message.length > 50
                                 ? `${chat.last_message.substring(0, 50)}...`

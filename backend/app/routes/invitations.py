@@ -96,6 +96,7 @@ def create_invitation():
         # Emit socket event ONLY to the invitee
         invitee_room = str(invitee_id)
         print(f"Emitting new_invitation to room: {invitee_room}")
+        print(f"Response data for socket: {response_data}")
         socketio.emit('new_invitation', response_data, room=invitee_room)
         print("Socket event emitted successfully")
         
@@ -145,20 +146,27 @@ def accept_invitation(invitation_id):
         # Mark invitation as accepted
         invitation.accept()
         
+        # Get channel response data
+        channel_data = channel.to_response_dict()
+        
         # Emit socket events
+        # 1. Notify inviter that invitation was accepted
         socketio.emit('invitation_accepted', invitation.to_response_dict(), room=str(invitation.inviter_id))
+        
+        # 2. Notify channel members about the new member
         socketio.emit('channel_member_added', {
             'channel_id': str(channel._id),
             'user_id': user_id
         }, room=str(channel._id))
         
-        # Also emit to all channel members
+        # 3. Send channel update to all members
         for member_id in channel.members:
-            socketio.emit('channel_updated', channel.to_response_dict(), room=str(member_id))
+            socketio.emit('channel_updated', channel_data, room=str(member_id))
         
         return jsonify(invitation.to_response_dict()), 200
         
     except Exception as e:
+        print(f"Error accepting invitation: {str(e)}")
         return jsonify({'error': str(e)}), 400
 
 @invitations_bp.route('/<invitation_id>/reject', methods=['POST'])

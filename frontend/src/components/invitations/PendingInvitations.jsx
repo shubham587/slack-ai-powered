@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useCallback } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import {
   Box,
@@ -8,7 +8,6 @@ import {
   HStack,
   useToast,
   Spinner,
-  Badge,
 } from '@chakra-ui/react';
 import {
   fetchPendingInvitations,
@@ -17,105 +16,86 @@ import {
   selectPendingInvitations,
   selectInvitationsLoading,
   selectInvitationsError,
-  addInvitation,
 } from '../../store/slices/invitationsSlice';
 import { getSocket } from '../../socket';
 
 const PendingInvitations = () => {
   const dispatch = useDispatch();
   const toast = useToast();
-  const [actionLoading, setActionLoading] = useState({});
-  const currentUserId = localStorage.getItem('userId');
-  
-  const allInvitations = useSelector(selectPendingInvitations) || [];
-  const pendingInvitations = allInvitations.filter(inv => inv.invitee_id === currentUserId);
+  const allInvitations = useSelector(selectPendingInvitations);
   const isLoading = useSelector(selectInvitationsLoading);
   const error = useSelector(selectInvitationsError);
+  const currentUserId = localStorage.getItem('user_id');
 
-  useEffect(() => {
-    // Fetch pending invitations when component mounts
-    dispatch(fetchPendingInvitations());
+  // Filter invitations for the current user
+  const invitations = allInvitations.filter(inv => inv.invitee_id === currentUserId);
 
-    // Get socket instance
-    const socket = getSocket();
-    if (!socket) {
-      console.error('Socket not initialized');
-      return;
-    }
-
-    // Set up socket event listeners
-    const handleNewInvitation = (data) => {
-      console.log('Received new invitation:', data);
-      // Only add invitation if current user is the invitee
-      if (data.invitee_id === currentUserId) {
-        dispatch(addInvitation(data));
-        toast({
-          title: 'New Channel Invitation',
-          description: `${data.inviter_username} invited you to join #${data.channel_name}`,
-          status: 'info',
-          duration: 5000,
-          isClosable: true,
-        });
-      }
-    };
-
-    socket.on('new_invitation', handleNewInvitation);
-
-    // Cleanup
-    return () => {
-      socket.off('new_invitation', handleNewInvitation);
-    };
-  }, [dispatch, toast, currentUserId]);
-
-  const handleAccept = async (invitationId) => {
+  // Memoize the handlers to prevent unnecessary re-renders
+  const handleAccept = useCallback(async (invitationId) => {
     try {
-      setActionLoading(prev => ({ ...prev, [invitationId]: true }));
       await dispatch(acceptInvitation(invitationId)).unwrap();
       toast({
-        title: 'Invitation Accepted',
+        title: 'Invitation accepted',
         status: 'success',
         duration: 3000,
         isClosable: true,
       });
     } catch (error) {
       toast({
-        title: 'Error',
-        description: error.message || 'Failed to accept invitation',
+        title: 'Error accepting invitation',
+        description: error.message || 'Something went wrong',
         status: 'error',
         duration: 3000,
         isClosable: true,
       });
-    } finally {
-      setActionLoading(prev => ({ ...prev, [invitationId]: false }));
     }
-  };
+  }, [dispatch, toast]);
 
-  const handleReject = async (invitationId) => {
+  const handleReject = useCallback(async (invitationId) => {
     try {
-      setActionLoading(prev => ({ ...prev, [invitationId]: true }));
       await dispatch(rejectInvitation(invitationId)).unwrap();
       toast({
-        title: 'Invitation Rejected',
-        status: 'info',
+        title: 'Invitation rejected',
+        status: 'success',
         duration: 3000,
         isClosable: true,
       });
     } catch (error) {
       toast({
-        title: 'Error',
-        description: error.message || 'Failed to reject invitation',
+        title: 'Error rejecting invitation',
+        description: error.message || 'Something went wrong',
         status: 'error',
         duration: 3000,
         isClosable: true,
       });
-    } finally {
-      setActionLoading(prev => ({ ...prev, [invitationId]: false }));
     }
-  };
+  }, [dispatch, toast]);
+
+  useEffect(() => {
+    // Fetch pending invitations when component mounts
+    dispatch(fetchPendingInvitations());
+
+    // Set up socket event listeners
+    const socket = getSocket();
+    if (!socket) {
+      console.error('Socket not initialized');
+      return;
+    }
+
+    // Join user's personal room
+    if (currentUserId) {
+      socket.emit('join_user_room', { user_id: currentUserId });
+    }
+
+    // Clean up function
+    return () => {
+      // No need to remove listeners as they are handled globally in socket.js
+    };
+  }, [dispatch, currentUserId]);
 
   if (isLoading) {
     return (
-      <Box p={4} bg="gray.800" borderRadius="md" shadow="md">
+      <Box textAlign="center" py={4}>
         <Spinner />
       </Box>
     );
@@ -123,67 +103,48 @@ const PendingInvitations = () => {
 
   if (error) {
     return (
-      <Box p={4} bg="gray.800" borderRadius="md" shadow="md">
-        <Text color="red.500">Error: {error}</Text>
+      <Box p={4} bg="red.100" color="red.900" borderRadius="md">
+        <Text>Error: {error}</Text>
       </Box>
     );
   }
 
-  if (!pendingInvitations.length) {
-    return null;
-  }
-
   return (
-    <Box p={4} bg="gray.800" borderRadius="md" shadow="md" maxW="sm">
-      <VStack spacing={4} align="stretch">
-        <Text color="white" fontWeight="bold" fontSize="lg">
-          Pending Invitations
-          <Badge ml={2} colorScheme="blue">
-            {pendingInvitations.length}
-          </Badge>
-        </Text>
-        {pendingInvitations.map((invitation) => (
-          <Box
-            key={invitation.id}
-            p={4}
-            bg="gray.700"
-            borderRadius="md"
-            shadow="sm"
-          >
-            <VStack align="stretch" spacing={3}>
-              <Text color="white">
-                <Text as="span" fontWeight="bold">
-                  {invitation.inviter_username}
-                </Text>{' '}
-                invited you to join{' '}
-                <Text as="span" fontWeight="bold">
-                  #{invitation.channel_name}
-                </Text>
-              </Text>
-              <HStack spacing={2} justify="flex-end">
-                <Button
-                  size="sm"
-                  colorScheme="red"
-                  variant="outline"
-                  isLoading={actionLoading[invitation.id]}
-                  onClick={() => handleReject(invitation.id)}
-                >
-                  Decline
-                </Button>
-                <Button
-                  size="sm"
-                  colorScheme="green"
-                  isLoading={actionLoading[invitation.id]}
-                  onClick={() => handleAccept(invitation.id)}
-                >
-                  Accept
-                </Button>
-              </HStack>
-            </VStack>
-          </Box>
-        ))}
-      </VStack>
-    </Box>
+    <VStack spacing={4} align="stretch">
+      {invitations.map((invitation) => (
+        <Box
+          key={invitation.id}
+          p={4}
+          borderWidth={1}
+          borderRadius="md"
+          position="relative"
+        >
+          <Text fontWeight="bold" mb={2}>
+            Channel: #{invitation.channel_name}
+          </Text>
+          <Text fontSize="sm" color="gray.500" mb={4}>
+            Invited by: {invitation.inviter_username}
+          </Text>
+          <HStack spacing={4} justify="flex-end">
+            <Button
+              colorScheme="red"
+              variant="outline"
+              size="sm"
+              onClick={() => handleReject(invitation.id)}
+            >
+              Reject
+            </Button>
+            <Button
+              colorScheme="green"
+              size="sm"
+              onClick={() => handleAccept(invitation.id)}
+            >
+              Accept
+            </Button>
+          </HStack>
+        </Box>
+      ))}
+    </VStack>
   );
 };
 

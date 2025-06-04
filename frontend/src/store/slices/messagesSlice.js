@@ -4,6 +4,7 @@ const messagesSlice = createSlice({
   name: 'messages',
   initialState: {
     messages: {},  // Keyed by channel_id
+    replies: {},  // Keyed by parent_id
     loading: false,
     error: null
   },
@@ -16,28 +17,58 @@ const messagesSlice = createSlice({
       const message = action.payload;
       const channelId = message.channel_id;
       
+      // Initialize messages array for channel if it doesn't exist
       if (!state.messages[channelId]) {
         state.messages[channelId] = [];
       }
       
-      // Check for duplicates
-      const exists = state.messages[channelId].some(msg => msg.id === message.id);
-      if (!exists) {
+      // Add message if it doesn't already exist
+      const messageExists = state.messages[channelId].some(
+        m => (m._id === message._id || m.id === message.id)
+      );
+      
+      if (!messageExists) {
         state.messages[channelId].push(message);
-        // Sort messages by timestamp
-        state.messages[channelId].sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+      }
+    },
+    addReply: (state, action) => {
+      const reply = action.payload;
+      const parentId = reply.parent_id;
+      
+      // Initialize replies map if it doesn't exist
+      if (!state.replies[parentId]) {
+        state.replies[parentId] = [];
+      }
+      
+      // Add reply if it doesn't already exist
+      const replyExists = state.replies[parentId].some(
+        r => (r._id === reply._id || r.id === reply.id)
+      );
+      
+      if (!replyExists) {
+        state.replies[parentId].push(reply);
+        
+        // Update reply count in all messages
+        Object.values(state.messages).forEach(channelMessages => {
+          channelMessages.forEach(message => {
+            if (message._id === parentId || message.id === parentId) {
+              message.reply_count = (message.reply_count || 0) + 1;
+            }
+          });
+        });
       }
     },
     updateMessage: (state, action) => {
-      const message = action.payload;
-      const channelId = message.channel_id;
+      const { id, changes } = action.payload;
       
-      if (state.messages[channelId]) {
-        const index = state.messages[channelId].findIndex(msg => msg.id === message.id);
-        if (index !== -1) {
-          state.messages[channelId][index] = message;
-        }
-      }
+      // Update message in all channels
+      Object.values(state.messages).forEach(channelMessages => {
+        channelMessages.forEach(message => {
+          if (message._id === id || message.id === id) {
+            Object.assign(message, changes);
+          }
+        });
+      });
     },
     deleteMessage: (state, action) => {
       const { messageId, channelId } = action.payload;
@@ -61,6 +92,7 @@ const messagesSlice = createSlice({
 export const {
   setMessages,
   addMessage,
+  addReply,
   updateMessage,
   deleteMessage,
   clearChannelMessages,

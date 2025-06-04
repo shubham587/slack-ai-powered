@@ -15,6 +15,7 @@ import {
   AlertDescription,
   VStack,
   Spinner,
+  useColorMode,
 } from '@chakra-ui/react';
 import { CloseIcon, RepeatIcon, WarningIcon } from '@chakra-ui/icons';
 
@@ -60,6 +61,7 @@ const AutoReplyComposer = ({
 }) => {
   const dispatch = useDispatch();
   const toast = useToast();
+  const { colorMode } = useColorMode();
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
   const [errorType, setErrorType] = useState(null);
@@ -194,6 +196,7 @@ const AutoReplyComposer = ({
 
   const handleSelectReply = (suggestion) => {
     try {
+      console.log('AutoReplyComposer - Selected suggestion:', suggestion);
       onSelectReply(suggestion.text);
       onClose();
       
@@ -223,268 +226,250 @@ const AutoReplyComposer = ({
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4">
       <Box 
-        className="bg-gray-800 rounded-lg shadow-xl w-full max-w-2xl"
         maxH="90vh"
         display="flex"
         flexDirection="column"
-        overflow="hidden" // Prevent outer box from scrolling
+        overflow="hidden"
+        bg={colorMode === 'dark' ? 'gray.800' : 'white'}
+        color={colorMode === 'dark' ? 'white' : 'gray.800'}
+        borderRadius="lg"
+        boxShadow="xl"
+        maxW="2xl"
+        w="full"
       >
-        {/* Header - Static */}
-        <Box flexShrink={0}>
-          <Flex p={4} borderBottom="1px" borderColor="gray.700" justify="space-between" align="center">
-            <Text fontSize="lg" fontWeight="semibold" color="white">
-              {message.is_improvement ? 'Improve Message' : 'Reply Suggestions'}
+        {/* Header */}
+        <Flex p={4} borderBottom="1px" borderColor={colorMode === 'dark' ? 'gray.700' : 'gray.200'} justify="space-between" align="center">
+          <Text fontSize="lg" fontWeight="semibold">
+            {message.is_improvement ? 'Improve Message' : 'Reply Suggestions'}
+          </Text>
+          <IconButton
+            icon={<CloseIcon />}
+            size="sm"
+            variant="ghost"
+            onClick={onClose}
+            aria-label="Close"
+          />
+        </Flex>
+
+        {/* Original Message */}
+        <Box p={4} borderBottom="1px" borderColor={colorMode === 'dark' ? 'gray.700' : 'gray.200'} bg={colorMode === 'dark' ? 'gray.750' : 'gray.50'}>
+          <Flex align="center" gap={2} mb={2}>
+            <Text fontSize="sm" color={colorMode === 'dark' ? 'gray.400' : 'gray.600'}>
+              {message.is_improvement ? 'Original:' : 'Replying to:'}
             </Text>
-            <IconButton
-              icon={<CloseIcon />}
-              size="sm"
-              variant="ghost"
-              colorScheme="whiteAlpha"
-              onClick={onClose}
-            />
+            {!message.draft && (
+              <Text fontSize="sm" color={colorMode === 'dark' ? 'blue.300' : 'blue.500'}>
+                {new Date(message.created_at).toLocaleTimeString([], {
+                  hour: '2-digit',
+                  minute: '2-digit',
+                  hour12: false
+                })}
+              </Text>
+            )}
           </Flex>
+          <Box 
+            bg={colorMode === 'dark' ? 'gray.700' : 'gray.100'} 
+            p={3} 
+            borderRadius="md"
+            borderLeft="4px solid"
+            borderLeftColor="blue.400"
+          >
+            <Text whiteSpace="pre-wrap" color={colorMode === 'dark' ? 'white' : 'gray.800'}>
+              {typeof message === 'string' ? message : message.content}
+            </Text>
+          </Box>
         </Box>
 
-        {/* Original Message - Static */}
-        <Box flexShrink={0}>
-          <Box p={4} borderBottom="1px" borderColor="gray.700" bg="gray.750">
-            <Flex align="center" gap={2} mb={2}>
-              <Text fontSize="sm" color="gray.400">
-                {message.is_improvement ? 'Original:' : 'Replying to:'}
+        {/* Options */}
+        <Box p={4} borderBottom="1px" borderColor={colorMode === 'dark' ? 'gray.700' : 'gray.200'}>
+          <Flex gap={4} mb={4}>
+            <Box flex="1">
+              <Text mb={1} fontSize="sm" fontWeight="medium" color={colorMode === 'dark' ? 'gray.300' : 'gray.600'}>
+                Tone
               </Text>
-              {!message.draft && (
-                <Text fontSize="sm" color="blue.300">
-                  {new Date(message.created_at).toLocaleTimeString([], {
-                    hour: '2-digit',
-                    minute: '2-digit',
-                    hour12: false
-                  })}
-                </Text>
-              )}
-            </Flex>
-            <Box 
-              bg="gray.700" 
-              p={3} 
-              borderRadius="md"
-              borderLeft="4px solid"
-              borderLeftColor="blue.400"
-            >
-              <Text color="white" whiteSpace="pre-wrap">
-                {typeof message === 'string' ? message : message.content}
-              </Text>
+              <Select
+                value={selectedTone}
+                onChange={(e) => setSelectedTone(e.target.value)}
+                bg={colorMode === 'dark' ? 'gray.700' : 'white'}
+                borderColor={colorMode === 'dark' ? 'gray.600' : 'gray.300'}
+                color={colorMode === 'dark' ? 'white' : 'gray.800'}
+                _hover={{ borderColor: colorMode === 'dark' ? 'gray.500' : 'gray.400' }}
+                isDisabled={isLoading}
+              >
+                {TONE_OPTIONS.map(option => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </Select>
             </Box>
-          </Box>
+
+            <Box flex="1">
+              <Text mb={1} fontSize="sm" fontWeight="medium" color={colorMode === 'dark' ? 'gray.300' : 'gray.600'}>
+                Length
+              </Text>
+              <Select
+                value={selectedLength}
+                onChange={(e) => setSelectedLength(e.target.value)}
+                bg={colorMode === 'dark' ? 'gray.700' : 'white'}
+                borderColor={colorMode === 'dark' ? 'gray.600' : 'gray.300'}
+                color={colorMode === 'dark' ? 'white' : 'gray.800'}
+                _hover={{ borderColor: colorMode === 'dark' ? 'gray.500' : 'gray.400' }}
+                isDisabled={isLoading}
+              >
+                {LENGTH_OPTIONS.map(option => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </Select>
+            </Box>
+          </Flex>
+
+          <Button
+            onClick={fetchSuggestions}
+            isLoading={isLoading}
+            width="full"
+            colorScheme="blue"
+            loadingText="Generating..."
+            isDisabled={isLoading}
+          >
+            Generate
+          </Button>
         </Box>
 
-        {/* Options - Static */}
-        <Box flexShrink={0}>
-          <Box p={4} borderBottom="1px" borderColor="gray.700">
-            <Flex gap={4} mb={4}>
-              {/* Tone Selection */}
-              <Box flex="1">
-                <Text mb={1} fontSize="sm" fontWeight="medium" color="gray.300">
-                  Tone
-                </Text>
-                <Select
-                  value={selectedTone}
-                  onChange={(e) => setSelectedTone(e.target.value)}
-                  bg="gray.700"
-                  borderColor="gray.600"
-                  color="white"
-                  _hover={{ borderColor: 'gray.500' }}
-                  isDisabled={isLoading}
-                >
-                  {TONE_OPTIONS.map(option => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </Select>
-              </Box>
-
-              {/* Length Selection */}
-              <Box flex="1">
-                <Text mb={1} fontSize="sm" fontWeight="medium" color="gray.300">
-                  Length
-                </Text>
-                <Select
-                  value={selectedLength}
-                  onChange={(e) => setSelectedLength(e.target.value)}
-                  bg="gray.700"
-                  borderColor="gray.600"
-                  color="white"
-                  _hover={{ borderColor: 'gray.500' }}
-                  isDisabled={isLoading}
-                >
-                  {LENGTH_OPTIONS.map(option => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </Select>
-              </Box>
-            </Flex>
-
-            <Button
-              onClick={fetchSuggestions}
-              isLoading={isLoading}
-              width="full"
-              colorScheme="blue"
-              loadingText="Generating..."
-              isDisabled={isLoading}
-            >
-              Generate
-            </Button>
-          </Box>
-        </Box>
-
-        {/* Suggestions - Scrollable */}
+        {/* Suggestions */}
         <Box 
           flex="1"
           overflowY="auto"
           minH="200px"
-          css={{
-            '&::-webkit-scrollbar': {
-              width: '8px',
-            },
-            '&::-webkit-scrollbar-track': {
-              background: 'var(--chakra-colors-gray-800)',
-            },
-            '&::-webkit-scrollbar-thumb': {
-              background: 'var(--chakra-colors-gray-600)',
-              borderRadius: '4px',
-            },
-            '&::-webkit-scrollbar-thumb:hover': {
-              background: 'var(--chakra-colors-gray-500)',
-            },
-          }}
+          p={4}
+          bg={colorMode === 'dark' ? 'gray.900' : 'gray.50'}
         >
-          <Box p={4} pb={8}> {/* Added bottom padding */}
-            {error && (
-              <Alert 
-                status={
-                  errorType === ERROR_TYPES.NETWORK || errorType === ERROR_TYPES.SERVER
-                    ? 'warning'
+          {error && (
+            <Alert 
+              status={
+                errorType === ERROR_TYPES.NETWORK || errorType === ERROR_TYPES.SERVER
+                  ? 'warning'
+                  : 'error'
+              }
+              mb={4} 
+              borderRadius="md"
+              variant="left-accent"
+            >
+              <AlertIcon />
+              <Box flex="1">
+                <AlertTitle>
+                  {errorType === ERROR_TYPES.NETWORK
+                    ? 'Connection Error'
                     : errorType === ERROR_TYPES.TOKEN
-                    ? 'error'
-                    : 'error'
-                }
-                mb={4} 
-                borderRadius="md"
-                variant="left-accent"
-              >
-                <AlertIcon />
-                <Box flex="1">
-                  <AlertTitle>
-                    {errorType === ERROR_TYPES.NETWORK
-                      ? 'Connection Error'
-                      : errorType === ERROR_TYPES.TOKEN
-                      ? 'Authentication Error'
-                      : errorType === ERROR_TYPES.RATE_LIMIT
-                      ? 'Rate Limited'
-                      : 'Error'}
-                  </AlertTitle>
-                  <AlertDescription display="block">
-                    {error}
-                    {retryCount > 0 && retryCount < MAX_RETRIES && (
-                      <Text mt={1} fontSize="sm">
-                        Retrying... Attempt {retryCount} of {MAX_RETRIES}
-                      </Text>
-                    )}
-                  </AlertDescription>
-                </Box>
-                {(errorType === ERROR_TYPES.NETWORK || 
-                  errorType === ERROR_TYPES.SERVER ||
-                  errorType === ERROR_TYPES.API) && (
-                  <IconButton
-                    icon={<RepeatIcon />}
-                    onClick={handleRetry}
-                    variant="ghost"
-                    colorScheme={errorType === ERROR_TYPES.NETWORK ? 'yellow' : 'red'}
-                    size="sm"
-                    ml={2}
-                    isLoading={isLoading}
-                    aria-label="Retry"
-                  />
-                )}
-              </Alert>
-            )}
-
-            {isLoading && !error && (
-              <Flex direction="column" align="center" justify="center" py={8}>
-                <Spinner size="xl" color="blue.400" thickness="4px" speed="0.65s" mb={4} />
-                <Text color="gray.400">Generating AI suggestions...</Text>
-                {retryCount > 0 && (
-                  <Text color="gray.500" fontSize="sm" mt={2}>
-                    Retry attempt {retryCount} of {MAX_RETRIES}
-                  </Text>
-                )}
-              </Flex>
-            )}
-
-            {suggestions.length > 0 ? (
-              <VStack spacing={4} align="stretch">
-                {suggestions.map((suggestion, index) => (
-                  <Box
-                    key={index}
-                    borderWidth="1px"
-                    borderColor="gray.700"
-                    rounded="md"
-                    p={4}
-                    _hover={{ borderColor: 'blue.500' }}
-                    cursor="pointer"
-                    onClick={() => handleSelectReply(suggestion)}
-                    bg="gray.750"
-                    role="button"
-                    aria-label={`Select suggestion ${index + 1}`}
-                  >
-                    <Flex justify="space-between" align="center" mb={2}>
-                      <Flex gap={2}>
-                        <Text
-                          px={2}
-                          py={1}
-                          bg="gray.700"
-                          rounded="md"
-                          fontSize="xs"
-                          color="gray.300"
-                        >
-                          {suggestion.tone}
-                        </Text>
-                        <Text
-                          px={2}
-                          py={1}
-                          bg="gray.700"
-                          rounded="md"
-                          fontSize="xs"
-                          color="gray.300"
-                        >
-                          {suggestion.length}
-                        </Text>
-                      </Flex>
-                      <Button
-                        size="sm"
-                        colorScheme="blue"
-                        variant="ghost"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleSelectReply(suggestion);
-                        }}
-                      >
-                        Use This
-                      </Button>
-                    </Flex>
-                    <Text color="gray.100" whiteSpace="pre-wrap">
-                      {suggestion.text}
+                    ? 'Authentication Error'
+                    : errorType === ERROR_TYPES.RATE_LIMIT
+                    ? 'Rate Limited'
+                    : 'Error'}
+                </AlertTitle>
+                <AlertDescription display="block">
+                  {error}
+                  {retryCount > 0 && retryCount < MAX_RETRIES && (
+                    <Text mt={1} fontSize="sm">
+                      Retrying... Attempt {retryCount} of {MAX_RETRIES}
                     </Text>
-                  </Box>
-                ))}
-              </VStack>
-            ) : !isLoading && !error && (
-              <Text textAlign="center" color="gray.400" py={8}>
-                Click "Generate" to get AI-powered suggestions
+                  )}
+                </AlertDescription>
+              </Box>
+              {(errorType === ERROR_TYPES.NETWORK || 
+                errorType === ERROR_TYPES.SERVER ||
+                errorType === ERROR_TYPES.API) && (
+                <IconButton
+                  icon={<RepeatIcon />}
+                  onClick={handleRetry}
+                  variant="ghost"
+                  colorScheme={errorType === ERROR_TYPES.NETWORK ? 'yellow' : 'red'}
+                  size="sm"
+                  ml={2}
+                  isLoading={isLoading}
+                  aria-label="Retry"
+                />
+              )}
+            </Alert>
+          )}
+
+          {isLoading && !error && (
+            <Flex direction="column" align="center" justify="center" py={8}>
+              <Spinner size="xl" color="blue.400" thickness="4px" speed="0.65s" mb={4} />
+              <Text color={colorMode === 'dark' ? 'gray.400' : 'gray.600'}>
+                Generating AI suggestions...
               </Text>
-            )}
-          </Box>
+              {retryCount > 0 && (
+                <Text color={colorMode === 'dark' ? 'gray.500' : 'gray.500'} fontSize="sm" mt={2}>
+                  Retry attempt {retryCount} of {MAX_RETRIES}
+                </Text>
+              )}
+            </Flex>
+          )}
+
+          {suggestions.length > 0 ? (
+            <VStack spacing={4} align="stretch">
+              {suggestions.map((suggestion, index) => (
+                <Box
+                  key={index}
+                  borderWidth="1px"
+                  borderColor={colorMode === 'dark' ? 'gray.700' : 'gray.300'}
+                  rounded="md"
+                  p={4}
+                  _hover={{ borderColor: 'blue.500' }}
+                  cursor="pointer"
+                  onClick={() => handleSelectReply(suggestion)}
+                  bg={colorMode === 'dark' ? 'gray.750' : 'white'}
+                  role="button"
+                  aria-label={`Select suggestion ${index + 1}`}
+                >
+                  <Flex justify="space-between" align="center" mb={2}>
+                    <Flex gap={2}>
+                      <Text
+                        px={2}
+                        py={1}
+                        bg={colorMode === 'dark' ? 'gray.700' : 'gray.100'}
+                        rounded="md"
+                        fontSize="xs"
+                        color={colorMode === 'dark' ? 'gray.300' : 'gray.600'}
+                      >
+                        {suggestion.tone}
+                      </Text>
+                      <Text
+                        px={2}
+                        py={1}
+                        bg={colorMode === 'dark' ? 'gray.700' : 'gray.100'}
+                        rounded="md"
+                        fontSize="xs"
+                        color={colorMode === 'dark' ? 'gray.300' : 'gray.600'}
+                      >
+                        {suggestion.length}
+                      </Text>
+                    </Flex>
+                    <Button
+                      size="sm"
+                      colorScheme="blue"
+                      variant="ghost"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleSelectReply(suggestion);
+                      }}
+                    >
+                      Use This
+                    </Button>
+                  </Flex>
+                  <Text color={colorMode === 'dark' ? 'gray.100' : 'gray.800'} whiteSpace="pre-wrap">
+                    {suggestion.text}
+                  </Text>
+                </Box>
+              ))}
+            </VStack>
+          ) : !isLoading && !error && (
+            <Text textAlign="center" color={colorMode === 'dark' ? 'gray.400' : 'gray.600'} py={8}>
+              Click "Generate" to get AI-powered suggestions
+            </Text>
+          )}
         </Box>
       </Box>
     </div>

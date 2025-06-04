@@ -61,19 +61,22 @@ export const createChannel = createAsyncThunk(
   }
 );
 
-export const updateChannel = createAsyncThunk(
+export const updateChannelDetails = createAsyncThunk(
   'channels/updateChannel',
   async ({ channelId, data }, { rejectWithValue }) => {
     try {
       const token = localStorage.getItem('token');
-      const response = await fetch(`${API_URL}/api/channels/${channelId}`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
-        },
-        body: JSON.stringify(data),
-      });
+      const response = await fetch(
+        `${API_URL}/api/channels/${channelId}`,
+        {
+          method: 'PUT',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(data),
+        }
+      );
 
       if (!response.ok) {
         throw new Error('Failed to update channel');
@@ -87,28 +90,14 @@ export const updateChannel = createAsyncThunk(
   }
 );
 
-export const addChannelMember = createAsyncThunk(
+export const addMemberToChannel = createAsyncThunk(
   'channels/addMember',
   async ({ channelId, userId }, { rejectWithValue }) => {
     try {
-      const token = localStorage.getItem('token');
-      const response = await fetch(`${API_URL}/api/channels/${channelId}/members`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
-        },
-        body: JSON.stringify({ user_id: userId }),
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to add member');
-      }
-
-      const updatedChannel = await response.json();
-      return { channelId, updatedChannel };
+      const response = await axios.post(`${API_URL}/api/channels/${channelId}/members`, { user_id: userId });
+      return response.data;
     } catch (error) {
-      return rejectWithValue(error.message);
+      return rejectWithValue(error.response?.data?.error || 'Failed to add member');
     }
   }
 );
@@ -118,15 +107,18 @@ export const removeChannelMember = createAsyncThunk(
   async ({ channelId, userId }, { rejectWithValue }) => {
     try {
       const token = localStorage.getItem('token');
-      const response = await fetch(`${API_URL}/api/channels/${channelId}/members/${userId}`, {
-        method: 'DELETE',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-        },
-      });
+      const response = await fetch(
+        `${API_URL}/api/channels/${channelId}/members/${userId}`,
+        {
+          method: 'DELETE',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+          },
+        }
+      );
 
       if (!response.ok) {
-        throw new Error('Failed to remove member');
+        throw new Error('Failed to remove member from channel');
       }
 
       return { channelId, userId };
@@ -182,21 +174,32 @@ const channelsSlice = createSlice({
     typingUsers: {},
   },
   reducers: {
-    addMemberToChannel: (state, action) => {
-      const { channel_id, user } = action.payload;
-      if (state.channels[channel_id] && !state.channels[channel_id].is_direct) {
-        if (!state.channels[channel_id].members) {
-          state.channels[channel_id].members = [];
-        }
-        state.channels[channel_id].members.push(user);
-      }
-    },
-    updateChannelData: (state, action) => {
+    addChannel: (state, action) => {
       const channel = action.payload;
-      if (!channel.is_direct || state.channels[channel.id]) {
+      if (!channel.is_direct) {
         state.channels[channel.id] = {
           ...state.channels[channel.id],
           ...channel,
+          members: channel.members || [],
+          name: channel.name || '',
+          description: channel.description || '',
+          is_private: channel.is_private || false,
+          created_by: channel.created_by || '',
+          created_at: channel.created_at || new Date().toISOString(),
+          last_message: channel.last_message || null,
+          last_message_at: channel.last_message_at || null,
+          topic: channel.topic || ''
+        };
+        console.log('Added/Updated channel in store:', state.channels[channel.id]);
+      }
+    },
+    updateChannel: (state, action) => {
+      const channel = action.payload;
+      if (state.channels[channel.id]) {
+        state.channels[channel.id] = {
+          ...state.channels[channel.id],
+          ...channel,
+          members: channel.members || state.channels[channel.id].members
         };
       }
     },
@@ -242,18 +245,21 @@ const channelsSlice = createSlice({
     },
     handleChannelUpdated: (state, action) => {
       const channel = action.payload;
-      if (!channel.is_direct || state.channels[channel.id]) {
+      if (!channel.is_direct) {
         state.channels[channel.id] = {
           ...state.channels[channel.id],
           ...channel,
+          members: channel.members || state.channels[channel.id]?.members || []
         };
       }
     },
     handleMemberAdded: (state, action) => {
-      const channel = state.channels[action.payload.channelId];
-      if (channel) {
-        channel.members = channel.members || [];
-        channel.members.push(action.payload.member);
+      const { channelId, member } = action.payload;
+      if (state.channels[channelId]) {
+        state.channels[channelId].members = state.channels[channelId].members || [];
+        if (!state.channels[channelId].members.some(m => m.id === member.id)) {
+          state.channels[channelId].members.push(member);
+        }
       }
     },
     handleMemberRemoved: (state, action) => {
@@ -273,7 +279,10 @@ const channelsSlice = createSlice({
         state.isLoading = false;
         state.channels = action.payload.reduce((acc, channel) => {
           if (!channel.is_direct) {
-            acc[channel.id] = channel;
+            acc[channel.id] = {
+              ...channel,
+              members: channel.members || []
+            };
           }
           return acc;
         }, {});
@@ -287,18 +296,53 @@ const channelsSlice = createSlice({
           state.channels[action.payload.id] = action.payload;
         }
       })
-      .addCase(updateChannel.fulfilled, (state, action) => {
-        state.channels[action.payload.id] = action.payload;
+      .addCase(updateChannelDetails.pending, (state) => {
+        state.isLoading = true;
+        state.error = null;
       })
-      .addCase(updateChannel.rejected, (state, action) => {
+      .addCase(updateChannelDetails.fulfilled, (state, action) => {
+        const updatedChannel = action.payload;
+        state.channels[updatedChannel.id] = {
+          ...state.channels[updatedChannel.id],
+          ...updatedChannel,
+        };
+        state.isLoading = false;
+      })
+      .addCase(updateChannelDetails.rejected, (state, action) => {
         state.isLoading = false;
         state.error = action.payload;
       })
-      .addCase(addChannelMember.fulfilled, (state, action) => {
-        state.channels[action.payload.channelId] = action.payload.updatedChannel;
+      .addCase(addMemberToChannel.pending, (state) => {
+        state.isLoading = true;
+        state.error = null;
+      })
+      .addCase(addMemberToChannel.fulfilled, (state, action) => {
+        const channel = action.payload;
+        if (!channel.is_direct) {
+          state.channels[channel.id] = channel;
+        }
+        state.isLoading = false;
+      })
+      .addCase(addMemberToChannel.rejected, (state, action) => {
+        state.isLoading = false;
+        state.error = action.payload;
+      })
+      .addCase(removeChannelMember.pending, (state) => {
+        state.isLoading = true;
+        state.error = null;
       })
       .addCase(removeChannelMember.fulfilled, (state, action) => {
-        delete state.channels[action.payload.channelId];
+        const { channelId, userId } = action.payload;
+        if (state.channels[channelId] && state.channels[channelId].members) {
+          state.channels[channelId].members = state.channels[channelId].members.filter(
+            member => member.id !== userId
+          );
+        }
+        state.isLoading = false;
+      })
+      .addCase(removeChannelMember.rejected, (state, action) => {
+        state.isLoading = false;
+        state.error = action.payload;
       })
       .addCase(createDirectMessage.fulfilled, (state, action) => {
         // Don't add direct messages to the channels list
@@ -314,8 +358,8 @@ const channelsSlice = createSlice({
 });
 
 export const {
-  addMemberToChannel,
-  updateChannelData,
+  addChannel,
+  updateChannel,
   setChannels,
   removeChannel,
   setActiveChannel,

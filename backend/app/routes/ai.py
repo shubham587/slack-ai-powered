@@ -740,16 +740,19 @@ def generate_notes():
         if thread_id_obj:
             # Get thread messages
             messages = list(db.messages.find({
-                'thread_id': thread_id_obj
+                '$or': [
+                    {'_id': thread_id_obj},  # Get the parent message
+                    {'parent_id': thread_id_obj}  # Get all replies
+                ]
             }).sort('created_at', 1))
-            parent_message = db.messages.find_one({'_id': thread_id_obj})
-            if not parent_message:
+            
+            if not messages:
                 return jsonify({
                     'status': 'error',
                     'message': 'Thread not found'
                 }), 404
-            thread_title = parent_message.get('content')
-            messages = [parent_message] + messages
+                
+            thread_title = messages[0].get('content') if messages else None
         else:
             # Get channel messages
             messages = list(db.messages.find({

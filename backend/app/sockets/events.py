@@ -37,6 +37,7 @@ def handle_connect():
             
             # Join user's personal room
             join_room(str(user_id))
+            print(f"User {user_id} joined their personal room")
             
         except Exception as e:
             print(f"Token verification failed: {str(e)}")
@@ -104,16 +105,16 @@ def on_leave(data):
         print(f"Error in on_leave: {str(e)}")
 
 @socketio.on('join_user_room')
-def on_join_user_room(data):
-    """Handle joining a user's personal room"""
+def handle_join_user_room(data):
+    """Join a user's personal room for notifications"""
     try:
-        if 'user_id' in data:
-            user_id = str(data['user_id'])
-            print(f"User {user_id} joining their personal room")
-            join_room(user_id)
-            emit('user_room_joined', {'user_id': user_id}, room=user_id)
+        user_id = data.get('user_id')
+        if user_id:
+            join_room(str(user_id))
+            print(f"User {user_id} joined their personal room")
+            emit('user_room_joined', {'user_id': str(user_id)}, room=str(user_id))
     except Exception as e:
-        print(f"Error in on_join_user_room: {str(e)}")
+        print(f"Error joining user room: {e}")
 
 @socketio.on('typing')
 def handle_typing(data):
@@ -133,18 +134,33 @@ def handle_join_channel(data):
         if not channel_id:
             return
             
+        # Get user from session
+        user_id = session.get('user_id')
+        if not user_id:
+            print("No user_id in session")
+            return
+            
+        # Verify user is a member of the channel
+        channel = Channel.get_by_id(channel_id)
+        if not channel:
+            print(f"Channel {channel_id} not found")
+            return
+            
+        if not any(str(member) == user_id for member in channel.members):
+            print(f"User {user_id} is not a member of channel {channel_id}")
+            return
+            
         # Join the channel room
-        join_room(channel_id)
+        join_room(str(channel_id))
+        print(f"User {user_id} joined channel room {channel_id}")
         
         # Emit user joined event to channel
-        user_id = session.get('user_id')
-        if user_id:
-            user = User.get_by_id(user_id)
-            if user:
-                emit('user_joined', {
-                    'user': user.to_response_dict(),
-                    'channel_id': channel_id
-                }, room=channel_id)
+        user = User.get_by_id(user_id)
+        if user:
+            emit('user_joined', {
+                'user': user.to_response_dict(),
+                'channel_id': str(channel_id)
+            }, room=str(channel_id))
                 
     except Exception as e:
         print(f"Join channel error: {str(e)}")

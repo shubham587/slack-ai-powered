@@ -16,12 +16,14 @@ import {
   VStack,
   Textarea,
   useToast,
+  useColorMode,
 } from '@chakra-ui/react';
 import { createChannel } from '../../store/slices/channelsSlice';
 
 const CreateChannelModal = ({ isOpen, onClose }) => {
   const dispatch = useDispatch();
   const toast = useToast();
+  const { colorMode } = useColorMode();
   
   const [formData, setFormData] = useState({
     name: '',
@@ -80,14 +82,20 @@ const CreateChannelModal = ({ isOpen, onClose }) => {
   };
   
   return (
-    <Modal isOpen={isOpen} onClose={onClose}>
+    <Modal isOpen={isOpen} onClose={onClose} isCentered>
       <ModalOverlay />
-      <ModalContent bg="gray.800" color="white">
+      <ModalContent 
+        bg={colorMode === 'dark' ? 'gray.800' : 'white'}
+        color={colorMode === 'dark' ? 'white' : 'black'}
+        borderColor={colorMode === 'dark' ? 'gray.700' : 'gray.200'}
+      >
         <form onSubmit={handleSubmit}>
-          <ModalHeader>Create a Channel</ModalHeader>
+          <ModalHeader borderBottom="1px" borderColor={colorMode === 'dark' ? 'gray.700' : 'gray.200'}>
+            Create a Channel
+          </ModalHeader>
           <ModalCloseButton />
           
-          <ModalBody>
+          <ModalBody py={4}>
             <VStack spacing={4}>
               <FormControl isRequired>
                 <FormLabel>Channel Name</FormLabel>
@@ -96,7 +104,11 @@ const CreateChannelModal = ({ isOpen, onClose }) => {
                   value={formData.name}
                   onChange={handleChange}
                   placeholder="e.g. project-updates"
-                  _placeholder={{ color: 'gray.500' }}
+                  _placeholder={{ color: colorMode === 'dark' ? 'gray.500' : 'gray.400' }}
+                  bg={colorMode === 'dark' ? 'gray.700' : 'white'}
+                  borderColor={colorMode === 'dark' ? 'gray.600' : 'gray.300'}
+                  _hover={{ borderColor: colorMode === 'dark' ? 'gray.500' : 'gray.400' }}
+                  _focus={{ borderColor: 'blue.500', boxShadow: 'none' }}
                 />
               </FormControl>
               
@@ -107,7 +119,11 @@ const CreateChannelModal = ({ isOpen, onClose }) => {
                   value={formData.description}
                   onChange={handleChange}
                   placeholder="What's this channel about?"
-                  _placeholder={{ color: 'gray.500' }}
+                  _placeholder={{ color: colorMode === 'dark' ? 'gray.500' : 'gray.400' }}
+                  bg={colorMode === 'dark' ? 'gray.700' : 'white'}
+                  borderColor={colorMode === 'dark' ? 'gray.600' : 'gray.300'}
+                  _hover={{ borderColor: colorMode === 'dark' ? 'gray.500' : 'gray.400' }}
+                  _focus={{ borderColor: 'blue.500', boxShadow: 'none' }}
                 />
               </FormControl>
               
@@ -119,13 +135,19 @@ const CreateChannelModal = ({ isOpen, onClose }) => {
                   name="is_private"
                   isChecked={formData.is_private}
                   onChange={handleChange}
+                  colorScheme="blue"
                 />
               </FormControl>
             </VStack>
           </ModalBody>
           
-          <ModalFooter>
-            <Button variant="ghost" mr={3} onClick={onClose}>
+          <ModalFooter borderTop="1px" borderColor={colorMode === 'dark' ? 'gray.700' : 'gray.200'}>
+            <Button 
+              variant="ghost" 
+              mr={3} 
+              onClick={onClose}
+              _hover={{ bg: colorMode === 'dark' ? 'whiteAlpha.200' : 'gray.100' }}
+            >
               Cancel
             </Button>
             <Button

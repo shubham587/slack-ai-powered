@@ -11,6 +11,7 @@ import {
   Text,
   Flex,
   Input,
+  useColorMode,
 } from '@chakra-ui/react';
 import { AttachmentIcon, SmallCloseIcon, CloseIcon } from '@chakra-ui/icons';
 import { FiSend } from 'react-icons/fi';
@@ -27,9 +28,12 @@ const MessageInput = ({
   initialMessage = '',
   onCancel,
   replyingTo,
+  value,
+  onChange,
   customStyles = {}
 }) => {
-  const [message, setMessage] = useState(initialMessage);
+  const { colorMode } = useColorMode();
+  const [message, setMessage] = useState(value || initialMessage);
   const [showFileUpload, setShowFileUpload] = useState(false);
   const [selectedFile, setSelectedFile] = useState(null);
   const [showAiSuggestions, setShowAiSuggestions] = useState(false);
@@ -40,10 +44,21 @@ const MessageInput = ({
   const fileInputRef = React.useRef(null);
   const typingTimeoutRef = React.useRef(null);
 
+  // Update message when value prop changes
+  useEffect(() => {
+    if (value !== undefined) {
+      console.log('MessageInput - Updating value from prop:', value);
+      setMessage(value);
+    }
+  }, [value]);
+
   // Update message when initialMessage changes
   useEffect(() => {
-    setMessage(initialMessage);
-  }, [initialMessage]);
+    if (value === undefined && initialMessage) {
+      console.log('MessageInput - Updating from initialMessage:', initialMessage);
+      setMessage(initialMessage);
+    }
+  }, [initialMessage, value]);
 
   // Add useEffect to clear file state when channel changes
   useEffect(() => {
@@ -61,6 +76,9 @@ const MessageInput = ({
   const handleMessageChange = (e) => {
     const newMessage = e.target.value;
     setMessage(newMessage);
+    if (onChange) {
+      onChange(newMessage);
+    }
     setIsTyping(true);
 
     // Clear previous timeout
@@ -211,7 +229,8 @@ const MessageInput = ({
               icon={<AttachmentIcon />}
               onClick={handleAttachmentClick}
               variant="ghost"
-              colorScheme="whiteAlpha"
+              color={colorMode === 'dark' ? 'white' : 'black'}
+              _hover={{ bg: colorMode === 'dark' ? 'whiteAlpha.200' : 'blackAlpha.200' }}
               size="md"
               {...customStyles.attachButton}
             />
@@ -231,12 +250,23 @@ const MessageInput = ({
               onKeyDown={handleKeyDown}
               placeholder={placeholder}
               resize="none"
+              minH="40px"
+              maxH="200px"
+              overflow="auto"
               rows={1}
               bg="transparent"
               border="none"
               _focus={{ border: 'none', boxShadow: 'none' }}
               pr="100px"
+              color={colorMode === 'dark' ? 'white' : 'black'}
+              _placeholder={{ color: colorMode === 'dark' ? 'whiteAlpha.500' : 'blackAlpha.500' }}
               {...customStyles.input}
+              onInput={(e) => {
+                // Reset height to auto to properly calculate new height
+                e.target.style.height = 'auto';
+                // Set new height based on scrollHeight
+                e.target.style.height = `${e.target.scrollHeight}px`;
+              }}
             />
             
             {/* Tone Analysis */}
@@ -263,7 +293,8 @@ const MessageInput = ({
             onClick={handleAiClick}
             isDisabled={!message.trim()}
             variant="ghost"
-            colorScheme="whiteAlpha"
+            color={colorMode === 'dark' ? 'white' : 'black'}
+            _hover={{ bg: colorMode === 'dark' ? 'whiteAlpha.200' : 'blackAlpha.200' }}
             size="md"
             {...customStyles.aiButton}
           />
